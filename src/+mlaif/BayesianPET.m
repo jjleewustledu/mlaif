@@ -11,12 +11,13 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
 	%  N.B. classdef (Sealed, Hidden, InferiorClasses = {?class1,?class2}, ConstructOnLoad) 
 
     properties (Constant)
+        HOME = '/Volumes/PassportStudio2/cvl/np755'
         PLOT_4 = true    
     end
        
     properties
         showPlots = true;
-        studyId        
+        fileprefix        
         xLabel    = 'time/s'
         yLabel    = 'counts'
         
@@ -34,7 +35,7 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
     
     methods %% GET
         function bt = get.baseTitle(this)
-            bt = sprintf('PET AIF, whole-brain from %s', this.studyId);
+            bt = sprintf('PET AIF, whole-brain from %s', this.fileprefix);
         end
         function c  = get.aifConc(this)   
             assert(~isempty(this.aifPET));
@@ -44,6 +45,7 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
     
     methods (Static)
         function bps = runSessions(varargin)
+            cd(mlaif.BayesianPET.HOME);
             p = inputParser;
             addOptional(p, 'tInitial', 1, @isnumeric);
             parse(p, varargin{:});
@@ -61,6 +63,7 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
             diary off
         end
         function bayesianPet  = runSession(sessStr, fracaif, t01, toffset)
+            cd(mlaif.BayesianPET.HOME);
             bayesDir = fullfile(sessStr, 'bayesian_pet', '');
             crvDir   = fullfile(sessStr, 'ECAT_EXACT', 'pet', '');
             assert(lexist(bayesDir, 'dir'), 'BayesianPET.runSession could not find dir %s', bayesDir);
@@ -68,15 +71,15 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
             
             pwd0 = pwd;            
             try
-                import mlfourd.*;
+                import mlfourd.* mlsystem.*;
                 cd(bayesDir);                
                 diary('bayesianPet_2014no11.log');
                 dt = DirTool(fullfile(crvDir, 'p*ho*.crv'));
                 bayesianPet = mlaif.BayesianPET(sessStr, strtok(dt.fns{1}, '.'));
                 bayesianPet = bayesianPet.estimateParameters(fracaif, t01, toffset);
-                filename = fullfile(bayesDir, ['bayesianPet_' str2mmnum(bayesDir) '_' str2pnum(bayesDir) '.mat']);
-                save(filename, 'bayesianPet');
-                fprintf('BayesianPET.runSession saved %s\n', filename);
+                fqfn = fullfile(bayesDir, ['bayesianPet_' str2mmnum(bayesDir) '_' str2pnum(bayesDir) '.mat']);
+                save(fqfn, 'bayesianPet');
+                fprintf('BayesianPET.runSession saved %s\n', fqfn);
                 diary off
                 cd(pwd0);
             catch ME
@@ -126,7 +129,7 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
             figure
             plot(this.independentData, this.aifConc / max(this.aifConc), ...
                  this.independentData, this.dependentData  / max(this.dependentData),  'b--')
-            title(['PET AIF, whole-brain from ', this.studyId])
+            title(['PET AIF, whole-brain from ', this.fileprefix])
             xlabel('time/s')
             ylabel(sprintf('tracer concentration (%g, %g)', ...
                    max(this.aifConc), max(this.dependentData)))
@@ -137,7 +140,7 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
             figure
             plot(this.independentData, this.aifPET.tracerConcentrations, ...
                  this.independentData, this.estimatedAif, 'b--');
-            title(sprintf('PET AIF from %s, Bayesian estimated AIF', this.studyId))
+            title(sprintf('PET AIF from %s, Bayesian estimated AIF', this.fileprefix))
             xlabel('time/s')
             ylabel(sprintf('tracer concentration (%g, %g)', ...
                    max(this.aifPET.tracerConcentrations), max(this.estimatedAif)))
@@ -150,12 +153,12 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
                  this.independentData, this.dependentData  / max(this.dependentData),                    'b--', ...
                  this.independentData, this.estimatedAif / max(this.estimatedAif), 'g-.', ...
                  this.independentData, this.estimatedWb  /  max(this.dependentData),  'r:');
-            title(sprintf('PET AIF & whole-brain from %s; AIF & whole-brain estimated', this.studyId))
+            title(sprintf('PET AIF & whole-brain from %s; AIF & whole-brain estimated', this.fileprefix))
             xlabel('time/s')
             ylabel(sprintf('tracer concentration (%g, %g, %g, %g)', ...
                    max(this.aifConc), max(this.dependentData), max(this.estimatedAif), max(this.estimatedWb)))   
         end
-        function sse = sumSquaredErrors(this, p)
+        function sse  = sumSquaredErrors(this, p)
             p = num2cell(p);
             [~,wbtac] = this.aifPET.doublePassFast(p{:});
             sse = norm(this.dependentData  - wbtac)^2  / norm(this.dependentData)^2;
@@ -179,10 +182,10 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
  			
             p = inputParser;
             addRequired(p, 'sessionStr', @(x) assert(lexist(x, 'dir')));
-            addRequired(p, 'studyId',    @(x) assert(lstrfind(x, 'p')));
+            addRequired(p, 'fileprefix',    @(x) assert(lstrfind(x, 'p')));
             parse(p, varargin{:});
             sessStr      = p.Results.sessionStr;
-            this.studyId = p.Results.studyId;
+            this.fileprefix = p.Results.fileprefix;
             
             perfDir  = fullfile(sessStr, 'perfusion_4dfp', '');
             hoDir    = fullfile(sessStr, 'ECAT_EXACT', '962_4dfp', '');
@@ -193,11 +196,11 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
             
             import mlaif.*;           
             this.aifPET          = AifPET.load( ...
-                                   fullfile(crvDir, [this.studyId '.crv']), ...
+                                   fullfile(crvDir, [this.fileprefix '.crv']), ...
                                    fullfile(perfDir, 'perfusion_4dfp.log'));
             this.independentData = this.aifPET.timeInterpolants;
             wbPET                = WholeBrainPET.load( ...
-                                   fullfile(hoDir,  [this.studyId '_masked']));
+                                   fullfile(hoDir,  [this.fileprefix '_masked']));
             this.dependentData   = wbPET.tracerConcentrations;
  		end 
     end

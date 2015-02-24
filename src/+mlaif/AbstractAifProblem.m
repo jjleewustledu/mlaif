@@ -15,6 +15,11 @@ classdef AbstractAifProblem < mlbayesian.AbstractBayesianProblem
         yLabel
     end
     
+    properties (Constant)
+        PLOT_ORI      = true
+        PLOT_ESTIMATE = true
+    end    
+    
     properties (Dependent)
         length
         timeInterpolants

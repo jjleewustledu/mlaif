@@ -139,7 +139,7 @@ classdef AifPET < mlaif.PETDynamicsAbstract
         dcv_
     end
     
-    methods (Static, Access = 'private')        
+    methods (Static, Access = 'private')
         function f = ensureLength(f, len)
             %% ENSURELENGTH pads the end of a vector with the last vector value as needed to ensure a requested length
             %  padded_vec = this.ensureLength(vec, requested_length)
@@ -165,7 +165,7 @@ classdef AifPET < mlaif.PETDynamicsAbstract
         end
     end
     
-    methods (Access = 'private')        
+    methods (Access = 'private')
         function this = AifPET(dcvName, perfLogName, varargin)
  			%% AIFPET
  			%  Usage:   this = AifPET([parameter, parameter_values, ...])
@@ -178,7 +178,7 @@ classdef AifPET < mlaif.PETDynamicsAbstract
             [dcvDir,dcvName] = fileparts(dcvName);
             pwd0 = pwd;
             cd(dcvDir);
-            this.dcv_ = mlarbelaez.CRV(dcvName);
+            this.dcv_ = mlpet.CRV(dcvName);
             cd(pwd0);
             this.nativeMeasurements = this.clipFirstMeasurement(this.dcv_.counts');
             this.nativeTimes = this.dcv_.times'; 

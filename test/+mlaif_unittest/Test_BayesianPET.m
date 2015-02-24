@@ -20,7 +20,8 @@ classdef Test_BayesianPET < matlab.unittest.TestCase
 
 	methods (Test)
  		function test_estimateParameters(this)  			
-            this.assertNotEmpty(this.bayesianPET.estimateParameters);
+            this.bayesianPET = this.bayesianPET.estimateParameters(0.002649374031298, 21.649049340983780, 16.403646242905637);
+            this.assertTrue(isa(this.bayesianPET, 'mlaif.BayesianPET'));
  		end 
     end 
     

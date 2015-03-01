@@ -1,5 +1,5 @@
 classdef PETDynamicsAbstract < mlaif.AifAbstract
-	%% PETDYNAMICSABSTRACT defines tracerConcentrations, spline so as to be useful for most
+	%% PETDYNAMICSABSTRACT defines tracerConcentrations, pchip so as to be useful for most
     %  PET time-series.
 	%
 	%  $Revision$ 
@@ -19,15 +19,15 @@ classdef PETDynamicsAbstract < mlaif.AifAbstract
                 m(2) = m(3);
             end
         end     
- 		function yy = spline(this)
+ 		function yy = pchip(this)
             if (this.timeInterpolants(end) > this.nativeTimes(end))
                 error('mlaif:notImplemented', ...
-                      'requested time-point of cubic spline %g exceeds longest time-point of native data %g', ...
+                      'requested time-point of pchip %g exceeds longest time-point of native data %g', ...
                       this.timeInterpolants(end), this.nativeTimes(end));
             end
             Y          = zeros(1, length(this.nativeMeasurements)+2);
             Y(2:end-1) = this.nativeMeasurements(1:end);
-            yy         = spline(this.nativeTimes, Y, this.timeInterpolants);
+            yy         = pchip(this.nativeTimes, Y, this.timeInterpolants);
         end
     end
     

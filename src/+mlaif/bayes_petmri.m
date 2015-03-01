@@ -3,16 +3,16 @@
 import mlaif.*;
 
 N = 80;
-% get PET data from file and spline and display
+% get PET data from file and pchip and display
 load('p7861ho1AS.mat');
 
 dt = 1.0;
 tn = 1:N;
 
-iAIF = spline(tCor,cAIF,tn);
-iWB = spline(t,WB,tn);
-iGM = spline(t,CALLg,tn);
-iWM = spline(t,CALLw,tn);
+iAIF = pchip(tCor,cAIF,tn);
+iWB = pchip(t,WB,tn);
+iGM = pchip(t,CALLg,tn);
+iWM = pchip(t,CALLw,tn);
 
 % figure;
 % plot(t,WB,t,CALLg,t,CALLw);

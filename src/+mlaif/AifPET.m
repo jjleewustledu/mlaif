@@ -185,7 +185,7 @@ classdef AifPET < mlaif.PETDynamicsAbstract
             
             this.tracerConcentrations = this.clipFirstMeasurement(this.nativeMeasurements);
             if (~this.equivalent(this.timeInterpolants, this.nativeTimes))
-                this.tracerConcentrations = this.spline; end
+                this.tracerConcentrations = this.pchip; end
         end
     end
 

@@ -1,4 +1,4 @@
-classdef AbstractAifProblem < mlbayesian.AbstractBayesianProblem
+classdef (Abstract) AbstractAifProblem < mlbayesian.AbstractBayesianProblem
 	%% ABSTRACTAIFPROBLEM   
 
 	%  $Revision$ 

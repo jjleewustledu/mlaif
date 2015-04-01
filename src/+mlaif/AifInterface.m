@@ -1,4 +1,4 @@
-classdef AifInterface  
+classdef (Abstract) AifInterface  
 	%% AIFINTERFACE specifies how to import, store, interpolate, model, transform arterial input functions 
     %
 	%  $Revision$ 

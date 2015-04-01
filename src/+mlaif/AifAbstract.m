@@ -1,4 +1,4 @@
-classdef AifAbstract < mlaif.AifInterface 
+classdef (Abstract) AifAbstract < mlaif.AifInterface 
 	%% AIFABSTRACT manages interpolation of time
     %
 	%  $Revision$ 

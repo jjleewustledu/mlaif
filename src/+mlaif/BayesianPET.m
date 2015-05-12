@@ -16,7 +16,6 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
     end
        
     properties
-        showPlots = true;
         fileprefix        
         xLabel    = 'time/s'
         yLabel    = 'counts'

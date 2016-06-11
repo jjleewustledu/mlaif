@@ -1,4 +1,4 @@
-classdef (Abstract) AbstractAifProblem < mlbayesian.AbstractBayesianProblem
+classdef (Abstract) AbstractAifProblem < mlbayesian.AbstractMcmcProblem
 	%% ABSTRACTAIFPROBLEM   
 
 	%  $Revision$ 
@@ -19,27 +19,13 @@ classdef (Abstract) AbstractAifProblem < mlbayesian.AbstractBayesianProblem
         PLOT_ORI      = true
         PLOT_ESTIMATE = true
     end    
-    
-    properties (Dependent)
-        length
-        timeInterpolants
-    end
-    
-    methods %% GET
-        function le = get.length(this)
-            le = length(this.independentData);
-        end
-        function ti = get.timeInterpolants(this)
-            ti = this.independentData;
-        end
-    end
 
     methods
         function this = AbstractAifProblem(varargin)
  			%% ABSTRACTAIFPROBLEM 
  			%  Usage:  this = AbstractAifProblem([independent_data, dependent_data]) 
             
-            this = this@mlbayesian.AbstractBayesianProblem(varargin{:});
+            this = this@mlbayesian.AbstractMcmcProblem(varargin{:});
         end
         function this = runMcmc(this, paramsMap)
             %% RUNMCMC 

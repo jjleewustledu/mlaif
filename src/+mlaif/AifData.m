@@ -32,6 +32,7 @@ classdef AifData < handle
         normalizationFactor % recovery coefficient for IDIF; empirical rescaling for debugging measurements of AIF.
         stableToInterpolation % logical.  Indicates that makima, pchip and related interpolators are safe for use.
         T % seconds.  The duration at the start of artery_interpolated used by models but not recorded by scanner time-frames.
+        tArterialForced % see mlsiemens.BiographKit.alignArterialToScanner()
         tBuffer % seconds.  artery_interpolated(tBuffer + 1) corresponds to the first scanner time-frame.
     end
 
@@ -50,6 +51,9 @@ classdef AifData < handle
         end
         function g = get.T(this)
             g = this.T_;
+        end
+        function g = get.tArterialForced(this)
+            g = this.tArterialForced_;
         end
         function g = get.tBuffer(this)
             g = max(0, -this.Ddatetime0) + this.T;
@@ -74,6 +78,10 @@ classdef AifData < handle
             assert(isscalar(s))
             this.T_ = s;
         end
+        function set.tArterialForced(this, s)
+            assert(isscalar(s));
+            this.tArterialForced_ = s;
+        end
     end
         
     %% PRIVATE
@@ -83,6 +91,7 @@ classdef AifData < handle
         normalizationFactor_
         stableToInterpolation_
         T_
+        tArterialForced_
     end
 
     methods (Access = private)
@@ -90,9 +99,10 @@ classdef AifData < handle
         function this = AifData(varargin)
             ip = inputParser;
             addParameter(ip, 'Ddatetime0', 0, @isscalar);
-            addParameter(ip, 'normalizationFactor', 0, @isscalar);
+            addParameter(ip, 'normalizationFactor', 1, @isscalar);
             addParameter(ip, 'stableToInterpolation', false, @islogical)
             addParameter(ip, 'T', 0, @isscalar);
+            addParameter(ip, 'tArterialForced', 0, @isscalar);
             parse(ip, varargin{:});
             ipr = ip.Results;
 
@@ -100,6 +110,7 @@ classdef AifData < handle
             this.normalizationFactor_ = ipr.normalizationFactor;
             this.stableToInterpolation_ = ipr.stableToInterpolation;
             this.T_ = ipr.T;
+            this.tArterialForced_ = ipr.tArterialForced;
         end
     end
     

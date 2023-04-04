@@ -255,7 +255,7 @@ classdef ArterialInputFunction < handle & matlab.mixin.Heterogeneous & matlab.mi
             % assemble product; save cache_file
             this.product_ = mlfourd.ImagingContext2(aif_);
             save(this);
-            plot(this);
+            %plot(this);
             save(this.pet_earlyt_on_anatomy); % for exploratory QC
         end
         function ic = early_times_averaged(this, ic_dyn)
@@ -265,12 +265,15 @@ classdef ArterialInputFunction < handle & matlab.mixin.Heterogeneous & matlab.mi
                 return
             end
 
-            ic_avgxyz = ic_dyn.volumeAveraged(logical(this.msktgen(ic_dyn)));
+            bin = this.msktgen(ic_dyn);
+            bin = bin.binarized();
+            ic_avgxyz = ic_dyn.volumeAveraged(~bin);
             ic_max = dipmax(ic_avgxyz);
             img = ic_avgxyz.imagingFormat.img;
             [~,it10] = max(img > 0.1*ic_max);
-            [~,it75] = max(img > 0.75*ic_max);            
-            ic = ic_dyn.timeAveraged(it10:it75);
+            [~,it95] = max(img > 0.95*ic_max);    
+            dit = abs(it95-it10);
+            ic = ic_dyn.timeAveraged(it10:it95+dit);
             ic = ic.blurred(2.5);
         end
         function tf = is_carbon_monoxide(~, ic)
@@ -318,6 +321,24 @@ classdef ArterialInputFunction < handle & matlab.mixin.Heterogeneous & matlab.mi
             ylabel('specific activity (Bq/mL)', 'FontSize', 14);
             this.savefig(h);
         end
+        function h = plott(this, timesMid, plotargs)
+            arguments
+                this mlaif.ArterialInputFunction
+                timesMid double = []
+                plotargs = {}
+            end
+            if isempty(timesMid)
+                h = plot(this);
+                return
+            end
+
+            h = figure;
+            plot(timesMid, this.product, plotargs{:}, 'LineWidth', 2);
+            title(clientname(true, 2), 'Interpreter', 'none');
+            xlabel('frame', 'FontSize', 14);
+            ylabel('specific activity (Bq/mL)', 'FontSize', 14);
+            this.savefig(h);
+        end
         function this = reregister_centerline(this)
             %% Re-register centerline & pc_centerline to pet early times on anatomy as needed;
             %  apply bounding boxes.  
@@ -344,10 +365,10 @@ classdef ArterialInputFunction < handle & matlab.mixin.Heterogeneous & matlab.mi
         end
         function h = reregister_pcshow(this, varargin)
             if isempty(this.reregistration_)
-                markers = '*m';
+                markers = 'm';
                 note = ' before reregistration';
             else
-                markers = '*c';
+                markers = 'c';
                 note = ' after reregistration';
             end
 

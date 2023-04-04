@@ -1,7 +1,7 @@
 classdef Test_AbstractFung2013 < matlab.unittest.TestCase
     %% TEST_ABSTRACTFUNG2013 supports mlaif.AbstractFung2013, its class hierarchy, and their software ecosystem.
     %  See also: mlaif.ArterialAnatomy, mlaif.ArterialBoundingBox, mlaif.ArterialSegmentation, mlaif.ArterialCenterline,
-    %  mlaif.ECIC, mlaif.ICIC, mlaif.MMRFung2013, mlaif.VisionFung2013.
+    %  mlaif.ECIC, mlaif.ICIC, mlaif.MMRFung2013, mlaif.VisionFung2013, mlaif.Fung2013 (factory).
     %  
     %  Created 23-Mar-2022 15:07:12 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/test/+mlaif_unittest.
     %  Developed on Matlab 9.12.0.1884302 (R2022a) for MACI64.  Copyright 2022 John J. Lee.
@@ -13,10 +13,12 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
         fdg_avgt
         ho
         ho_avgt
+        mediator
         oc
         oc_avgt
         oo
         oo_avgt
+        simplemed
  		testObj
         tof
         t1w
@@ -25,6 +27,9 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
     end
     
     methods (Test)
+        function test_ctor(this)
+            disp(this)
+        end
         function test_afun(this)
             import mlaif.*
             this.assumeEqual(1,1);
@@ -38,7 +43,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             this.verifyTrue(isfile(this.oo.fqfn));
         end
         function test_ArterialAnatomy(this)
-            aa = mlaif.ArterialAnatomy.createForT1w('bids', this.bids);
+            aa = mlaif.ArterialAnatomy.createForT1w('bids', this.simplemed);
             disp(aa)
             this.verifyClass(aa, 'mlaif.ECIC');
             aa.anatomy.view(aa.exclusion_init)
@@ -52,7 +57,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             this.verifyEqual(aa.wmparc.product.fileprefix, ...
                 'wmparc_on_sub-108293_ses-20210218081506_T1w_MPR_vNav_4e_RMS_orient-std')
 
-            aa = mlaif.ArterialAnatomy.createForTof('bids', this.bids);
+            aa = mlaif.ArterialAnatomy.createForTof('bids', this.mediator);
             disp(aa)
             this.verifyClass(aa, 'mlaif.ICIC');
             aa.anatomy.view(aa.exclusion_init)
@@ -109,7 +114,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             ic.view(e1);
         end
         function test_ArterialCenterline_T1w(this)
-            fung2013 = mlaif.Fung2013.createForT1w('bids', this.bids, ...
+            fung2013 = mlaif.Fung2013.createForT1w('bids', this.simplemed, ...
                 'coord1', [76 154 14], ...
                 'coord2', [62 141 117]);            
             as = mlaif.ArterialSegmentation('fung2013', fung2013);
@@ -180,7 +185,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             pcshow(ac)
         end
         function test_ArterialInputFunction_T1w(this)
-            fung2013 = mlaif.Fung2013.createForT1w('bids', this.bids, ...
+            fung2013 = mlaif.Fung2013.createForT1w('bids', this.simplemed, ...
                 'coord1', [76 154 14], ...
                 'coord2', [62 141 117]);
             as = mlaif.ArterialSegmentation('fung2013', fung2013, ...
@@ -206,7 +211,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             save(aif.pet_earlyt_on_anatomy1);
             save(aif.ic_centerline1);
             save(aif.product);
-            figure; plot(aif.product);
+            plot(aif)
         end
         function test_ArterialInputFunction_tof(this)
             fung2013 = mlaif.Fung2013.createForTof('bids', this.bids, ...
@@ -268,7 +273,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             figure; plot(aif.product);
         end
         function test_ArterialSegmentation_T1w(this)
-            fung2013 = mlaif.Fung2013.createForT1w('bids', this.bids, ...
+            fung2013 = mlaif.Fung2013.createForT1w('bids', this.simplemed, ...
                 'coord1', [76 154 14], ...
                 'coord2', [62 141 117]);
             as = mlaif.ArterialSegmentation('fung2013', fung2013, 'use_cache', false);
@@ -317,6 +322,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
         end
         function test_bids(this)
             disp(this.bids)
+            disp(this.mediator)
         end
         function test_bsplineestim(~)
             % Illustrates B-spline curve estimation without knowing parameter values.
@@ -350,10 +356,14 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             hold off;
         end
         function test_call_t1w(this)
-            fung2013 = mlaif.Fung2013.createForT1w('bids', this.bids, ...
+            fung2013 = mlaif.Fung2013.createForT1w('bids', this.simplemed, ...
                 'coord1', [76 154 14], ...
-                'coord2', [62 141 117]);
-            fung2013.call('pet_dyn', this.ho, 'use_cache', true);
+                'coord2', [62 141 117], ...
+                'timesMid', cumsum(this.simplemed.taus()), ...
+                'needs_reregistration', false, ...
+                'verbose', 2);
+            ic = mlfourd.ImagingContext2(fullfile(this.simplemed.scanPath, 'sub-108293_ses-20210421155709_trc-fdg_proc-dyn_pet.nii.gz'));
+            fung2013.call('pet_dyn', ic, 'use_cache', true);
         end
         function test_call_tof(this)
             fung2013 = mlaif.Fung2013.createForTof('bids', this.bids, ...
@@ -452,27 +462,116 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             fung2013 = mlaif.Fung2013.createForTof('bids', this.bids, 'verbose', 2);
             disp(fung2013)
         end
+        function test_runSimpleFung2013_mpr(this)
+            cd('/data/brier/CerebralMetabolismMS/jjlee/1179204_v1')
+            this.simplemed = mlpipeline.SimpleMediator(...
+                fullfile(pwd, '1179204_v1_FDG.nii.gz'));
+            runSimpleFung2013( ...
+                '1179204_v1_FDG.nii.gz', ...
+                mpr='1179204_v1_mpr.nii.gz', ...
+                mra='1179204_v1_mra.nii.gz', ...
+                mpr_coords={[0 0 0]+1, [0 0 0]+1}, ...
+                mra_coords={}, ...
+                taus=[5*ones(1,24) 20*ones(1,9) 60*ones(1,10) 300*ones(1,9)], ... 
+                needs_reregistration=true, ...
+                verbose=2, ...
+                disp_only=false, ...
+                use_cache=false)
+        end
+        function test_runSimpleFung2013_carotid(this)
+            cd('/data/brier/CerebralMetabolismMS/jjlee/1179204_v1_gal')
+            this.simplemed = mlpipeline.SimpleMediator(...
+                fullfile(pwd, '1179204_v1_FDG.nii.gz'));
+            mra_coords = { ...
+                [304 231 5; 266 266 96]+1, ...
+                [121, 233, 6; 155, 272, 93]+1, ...
+                [299, 244, 96; 233, 304, 100]+1, ...
+                [123, 249, 93; 188, 304, 97]+1, ...
+                [254, 281, 100; 228, 329, 117]+1, ...
+                [170, 284, 97; 194, 329, 116]+1};
+            runSimpleFung2013( ...
+                '1179204_v1_FDG.nii.gz', ...
+                mpr='1179204_v1_mpr.nii.gz', ...
+                mra='1179204_v1_mra.nii.gz', ...
+                mpr_coords={}, ...
+                mra_coords=mra_coords, ...
+                taus=[5*ones(1,24) 20*ones(1,9) 60*ones(1,10) 300*ones(1,9)], ... 
+                needs_reregistration=true, ...
+                verbose=1, ...
+                disp_only=false, ...
+                use_cache=false) 
+
+            % N.B.:
+            % [207, 252, 97; 227, 277, 123]+1, basilar
+            % [298, 214, 64; 215, 243, 81]+1, R proatlantial
+            % [123, 224, 61; 215, 243, 81]+1, L proatlantial
+            % [253, 237 0; 276, 215, 35]+1, R vert 
+            % [189, 242, 0; 167, 221, 37]+1, L vert 
+            % [304 231 5; 266 266 96]+1, R cerv carotid
+            % [121, 233, 6; 155, 272, 93]+1, L cerv carotid
+            % [299, 244, 96; 233, 304, 100]+1, R petrous
+            % [123, 249, 93; 188, 304, 97]+1, L petrous 
+            % [254, 281, 100; 228, 329, 117]+1, R supra/clinoid
+            % [170, 284, 97; 194, 329, 116]+1, L supra/clinoid
+        end
+        function test_runSimpleFung2013_vertebral(this)
+            cd('/data/brier/CerebralMetabolismMS/jjlee/1179204_v1')
+            this.simplemed = mlpipeline.SimpleMediator(...
+                fullfile(pwd, '1179204_v1_FDG.nii.gz'));
+            mra_coords = { ...
+                [298, 214, 64; 215, 243, 81]+1, ...
+                [123, 224, 61; 215, 243, 81]+1, ...
+                [253, 237 0; 276, 215, 35]+1, ...
+                [189, 242, 0; 167, 221, 37]+1};
+            runSimpleFung2013( ...
+                '1179204_v1_FDG.nii.gz', ...
+                mpr='1179204_v1_mpr.nii.gz', ...
+                mra='1179204_v1_mra.nii.gz', ...
+                mpr_coords={}, ...
+                mra_coords=mra_coords, ...
+                taus=[5*ones(1,24) 20*ones(1,9) 60*ones(1,10) 300*ones(1,9)], ... 
+                needs_reregistration=true, ...
+                verbose=1, ...
+                disp_only=false, ...
+                use_cache=false) 
+
+            % N.B.:
+            % [207, 252, 97; 227, 277, 123]+1, basilar
+            % [298, 214, 64; 215, 243, 81]+1, R proatlantial
+            % [123, 224, 61; 215, 243, 81]+1, L proatlantial
+            % [253, 237 0; 276, 215, 35]+1, R vert 
+            % [189, 242, 0; 167, 221, 37]+1, L vert 
+            % [304 231 5; 266 266 96]+1, R cerv carotid
+            % [121, 233, 6; 155, 272, 93]+1, L cerv carotid
+            % [299, 244, 96; 233, 304, 100]+1, R petrous
+            % [123, 249, 93; 188, 304, 97]+1, L petrous 
+            % [254, 281, 100; 228, 329, 117]+1, R supra/clinoid
+            % [170, 284, 97; 194, 329, 116]+1, L supra/clinoid
+        end
 
         function test_Wmparc(this)
-            w = mlsurfer.Wmparc.createFromBids(this.bids);
+            w = mlsurfer.Wmparc.createFromBids(this.mediator);
             disp(w)
             w.product.view()
 
-            w = mlsurfer.Wmparc.createCoregisteredFromBids(this.bids, this.tof);
+            w = mlsurfer.Wmparc.createCoregisteredFromBids(this.mediator, this.tof);
             disp(w)
             w.product.view()
             deleteExisting(w.wmparc.fqfn)
             deleteExisting(w.T1.fqfn)
         end
         function test_ECIC(this)
-            aa = mlaif.ECIC('anatomy', this.t1w, 'bids', this.bids);
+            aa = mlaif.ECIC('anatomy', this.t1w, 'bids', this.simplemed);
             disp(aa)
             this.verifyEqual(aa.anatomy.fqfn, ...
-                fullfile(this.bids.anatPath, strcat(this.t1w.fileprefix, '', '.nii.gz')))
+                fullfile(this.simplemed.anatPath, strcat(this.t1w.fileprefix, '', '.nii.gz')))
             this.verifyTrue(isfile(aa.anatomy.fqfn))
             aa.anatomy.view(this.t1w) % visually inspect to be superimposable
 
-            deriv_fdg = this.bids.prepare_derivatives(this.fdg_avgt);
+            try
+                deriv_fdg = this.bids.prepare_derivatives(this.fdg_avgt);
+            catch
+            end
             pet = aa.pet_static_on_anatomy(deriv_fdg);
             pet.view(aa.anatomy)
             ana = aa.anatomy_on_pet(deriv_fdg);
@@ -486,7 +585,10 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             this.verifyTrue(isfile(aa.anatomy.fqfn))
             aa.anatomy.view(this.tof) % visually inspect to be superimposable
 
-            deriv_fdg = this.bids.prepare_derivatives(this.fdg_avgt);
+            try
+                deriv_fdg = this.bids.prepare_derivatives(this.fdg_avgt);
+            catch
+            end
             pet = aa.pet_static_on_anatomy(deriv_fdg);
             pet.view(aa.anatomy)
             ana = aa.anatomy_on_pet(deriv_fdg);
@@ -497,9 +599,25 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
     methods (TestClassSetup)
         function setupAbstractFung2013(this)
  			import mlvg.*;
+
+            % specific to CCIR project 1211, legacy *Bids objects
             this.bids = mlvg.Ccir1211Bids( ...
                 'destinationpath', ...
                 fullfile(getenv('SINGULARITY_HOME'), 'CCIR_01211', 'derivatives', 'sub-108293'));
+
+            % specific to CCIR project 1211, *Mediator design pattern
+            this.mediator = mlvg.Ccir1211Mediator( ...
+                fullfile(getenv('SINGULARITY_HOME'), 'CCIR_01211', 'derivatives', 'sub-108293', 'ses-20210421', 'pet', ...
+                'sub-108293_ses-20210421162709_trc-fdg_proc-static_pet.nii.gz'));
+
+            % working for projects w/o BIDS adherence, sharing base classes with *Mediator
+            this.simplemed = mlpipeline.SimpleMediator(...
+                fullfile(getenv('SINGULARITY_HOME'), 'SimpleProject', 'sub-simple', ...
+                'sub-108293_ses-20210421162709_trc-fdg_proc-static_pet.nii.gz'));
+            simplereg = mlpipeline.SimpleRegistry.instance();
+            simplereg.tracer = 'FDG';
+            simplereg.tausMap = containers.Map;
+            simplereg.tausMap('FDG') = [5*ones(1,24) 20*ones(1,9) 60*ones(1,10) 300*ones(1,9)];
 
             this.fdg =      mlfourd.ImagingContext2(fullfile(this.bids.sourcePetPath, 'sub-108293_ses-20210421155709_trc-fdg_proc-dyn_pet.nii.gz'));
             this.fdg_avgt = mlfourd.ImagingContext2(fullfile(this.bids.sourcePetPath, 'sub-108293_ses-20210421162709_trc-fdg_proc-static_pet.nii.gz'));
@@ -523,7 +641,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
             if ishandle(this.testObj_)
                 this.testObj = copy(this.testObj_);
             end
-            cd(this.bids.anatPath)
+            %cd(this.bids.anatPath)
             this.addTeardown(@this.cleanTestMethod)
         end
     end

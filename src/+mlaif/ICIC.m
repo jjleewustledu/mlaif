@@ -23,6 +23,8 @@ classdef ICIC < handle & mlaif.ArterialAnatomy
         end
         function g = get.exclusion_init(this)
             wmp = this.wmparc;
+            g = copy(wmp.select_all());
+
             g = copy(wmp.select_roi('brainstem+'));
             mnp = round(10./this.wmparc.product.imagingFormat.mmppix); % 10 mm dilation
             g = g.imdilate_bin(strel("cuboid", mnp));            

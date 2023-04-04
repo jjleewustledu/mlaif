@@ -200,11 +200,11 @@ classdef ArterialSegmentation < handle & matlab.mixin.Heterogeneous & matlab.mix
             
             %% KLUDGE
             %  N.B. mlfourd.ImagingFormatTool.set.originator, mlfourd_unittest.Test_ImagingContext2
-            nii.originator(1:3) = ic.imagingFormat.originator(1:3) - bb.originof + [2,0,0]./bb.mmppix; 
+            nii.originator(1:3) = ic.imagingFormat.originator(1:3) - bb.originof + ic.qfac*[2,0,0]./bb.mmppix; 
             this.product_ = mlfourd.ImagingContext2(nii);
             save(this);
-            patch(this);
-            pcshow(this);
+            %patch(this);
+            %pcshow(this);
         end
         function this = load(this)
             cf = load(this.cache_file);

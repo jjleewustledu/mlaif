@@ -165,7 +165,7 @@ classdef (Abstract) ArterialAnatomy < handle & matlab.mixin.Heterogeneous & matl
             tracer_tag = lower(this.bids.obj2tracer(pet));
             fqfn = strcat(this.anatomy.fqfp, '_on_', tracer_tag, '.nii.gz');
             ic = mlfourd.ImagingContext2(fqfn);
-            ic = mlaif.Fung2013.sourcedata2derivatives(ic);
+            ic = this.bids.sourcedata2derivatives(ic);
             f = copy(f_);
             f.invertXfm();
             f.in = this.niigz(this.anatomy);
@@ -262,7 +262,10 @@ classdef (Abstract) ArterialAnatomy < handle & matlab.mixin.Heterogeneous & matl
             
             this.bids_ = ipr.bids;
             this.anatomy_ = mlfourd.ImagingContext2(ipr.anatomy);
-            this.anatomy_ = this.bids.prepare_derivatives(this.anatomy_);
+            try
+                this.anatomy_ = this.bids.prepare_derivatives(this.anatomy_);
+            catch
+            end
             this.anatTag_ = 'anat';
             this.imdilate_scale_mm_ = ipr.imdilate_scale_mm;
             this.imdilate_strel_ = ipr.imdilate_strel;

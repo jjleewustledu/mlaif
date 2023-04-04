@@ -156,7 +156,7 @@ classdef ArterialCenterline < handle & matlab.mixin.Heterogeneous & matlab.mixin
             hold on; 
             pcshow(this.anatomy.pointCloud('threshp', this.pc_threshp));
             pc = this.pointCloud_for_anatomy();
-            ax = pcshow(pc.Location, '*m', 'MarkerSize', 3);
+            ax = pcshow(pc.Location, 'm', 'MarkerSize', 3);
             hold off;
             view(-210, 15) % tuned for orientstd
             daspect([1 1 1]);

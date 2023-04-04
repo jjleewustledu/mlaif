@@ -113,9 +113,11 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
         needs_reregistration % logical
         pc_threshp
         product
+        registry
         pet_dyn           % mlfourd.ImagingContext2
         str_coord1        % as nice char array
         str_coord2        % as nice char array
+        timesMid          
         verbose           % 0 is silent; default 1 provides QC; 2+ aids debugging
         wmparc
 
@@ -181,7 +183,7 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
             g = this.arterial_anatomy_.inclusion_thresh;
         end
         function g = get.needs_reregistration(this)
-            g = ~isa(this.arterial_anatomy_, 'mlaif.ICIC');
+            g = this.needs_reregistration_;
         end
         function g = get.pc_threshp(this)
             g = this.pc_threshp_;
@@ -195,11 +197,17 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
         function g = get.product(this)
             g = this.arterial_input_function_.product;
         end
+        function g = get.registry(this)
+            g = this.arterial_anatomy_.bids.registry;
+        end
         function g = get.str_coord1(this)
             g = strrep(strrep(strrep(mat2str(this.coord1), ' ', ','), '[', ''), ']', '');
         end
         function g = get.str_coord2(this)
             g = strrep(strrep(strrep(mat2str(this.coord2), ' ', ','), '[', ''), ']', '');
+        end
+        function g = get.timesMid(this)
+            g = this.timesMid_;
         end
         function g = get.verbose(this)
             g = this.verbose_;
@@ -209,24 +217,10 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
         end
 
         function g = get.k(this)
-            if isa(this.arterial_anatomy_, 'mlaif.ECIC')
-                g = 4; % cubic b-splines
-                return
-            end
-            if isa(this.arterial_anatomy_, 'mlaif.ICIC')
-                g = 5; % quartic b-splines
-                return
-            end
+            g = this.k_;
         end
         function g = get.t(this)
-            if isa(this.arterial_anatomy_, 'mlaif.ECIC')
-                g = [0 0 0 0 0.2 0.4 0.6 0.8 1 1 1 1];
-                return
-            end
-            if isa(this.arterial_anatomy_, 'mlaif.ICIC')
-                g = [0 0 0 0 0 0.5 0.7 1 1 1 1 1];
-                return
-            end
+            g = this.t_;
         end
         function g = get.N_centerline_samples(this)
             if isa(this.arterial_anatomy_, 'mlaif.ECIC')
@@ -241,34 +235,77 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
 
         %%
 
-        function call(this, varargin)
+        function idif = call(this, varargin)
             %  Args:
             %      coord1 (vector):  updates values from ctor.
             %      coord2 (vector):  updates values from ctor.
             %      use_cache (logical):  reuse cache file for ArterialSegmentation and ArterialCenterline, but
             %                            not for ArterialInputFunction.
+            %      timesMid (numeric): cumsum(taus) for dynamic PET.
+            %      verbose (scalar): 0 is silent; 1 provides QC; 2+ aids debugging.
+            %      k (scalar): 4 for ECIC, 5 for ICIC.
+            %      t (vector): [0 0 0 0 0.2 0.4 0.6 0.8 1 1 1 1] for ECIC;
+            %                  [0 0 0 0 0 0.5 0.7 1 1 1 1 1] for ICIC.
+            %  Returns:
+            %      idif (struct):  containing vectors img, timesMid
 
             ip = inputParser;
             addParameter(ip, 'coord1', this.coord1, @isvector);
             addParameter(ip, 'coord2', this.coord2, @isvector);
             addParameter(ip, 'pet_dyn', this.pet_dyn, @(x) ~isempty(x));
             addParameter(ip, 'use_cache', true, @islogical);
+            addParameter(ip, 'timesMid', this.timesMid_, @isnumeric);
+            addParameter(ip, 'verbose', this.verbose_, @isscalar);
+            addParameter(ip, 'k', 4, @isscalar);
+            addParameter(ip, 't', [0 0 0 0 0.2 0.4 0.6 0.8 1 1 1 1], @isnumeric);
             parse(ip, varargin{:})
             ipr = ip.Results;
+            this.verbose_ = ipr.verbose;
             this.coord1_ = ipr.coord1;
             this.coord2_ = ipr.coord2;
             this.pet_dyn_ = mlfourd.ImagingContext2(ipr.pet_dyn);
+            this.timesMid_ = ipr.timesMid;
+            this.k_ = ipr.k;
+            this.t_ = ipr.t;
 
             this.arterial_segmentation_ = mlaif.ArterialSegmentation( ...
                 'fung2013', this, ...
                 'use_cache', ipr.use_cache);
-            this.arterial_segmentation_.build_segmentation();
+            this.arterial_segmentation_.build_segmentation( ...
+                iterations=this.registry.snakes.iterations, ...
+                contractBias=this.registry.snakes.contractBias, ...
+                smoothFactor=this.registry.snakes.smoothFactor);
+            as = this.arterial_segmentation_;
+            switch this.verbose_
+                case 1
+                    patch(as)
+                    pcshow(as)
+                case {2}
+                    patch(as)
+                    pcshow(as)
+                    this.bids.t1w_ic.view_qc(as.product)
+                otherwise
+            end
 
             this.arterial_centerline_ = mlaif.ArterialCenterline( ...
                 'fung2013', this, ...
                 'segmentation', this.arterial_segmentation_.product, ...
                 'use_cache', ipr.use_cache);
             this.arterial_centerline_.build_centerline();
+            ac = this.arterial_centerline_;
+            switch this.verbose_
+                case 1
+                    plot3(ac)
+                    pcshow(ac)
+                case {2}
+                    plot3(ac)
+                    pcshow(ac)
+                    abb = mlaif.ArterialBoundingBox(ac.anatomy, ac.coord1, ac.coord2);
+                    anat = abb.insert(ac.product .* dipmax(ac.anatomy));
+                    anat = anat.threshp(95);
+                    ac.anatomy.view_qc(anat)
+                otherwise
+            end
 
             this.arterial_input_function_ = mlaif.ArterialInputFunction( ...
                 'fung2013', this, ...
@@ -278,11 +315,29 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
                 'pet_dyn', this.pet_dyn, ...
                 'use_cache', false);            
             this.arterial_input_function_.build_input_function();
-
             aif = this.arterial_input_function_;
+            switch this.verbose_
+                case 1
+                    plott(aif, this.timesMid_)
+                case {2}
+                    if this.needs_reregistration
+                        aif.pet_earlyt_on_anatomy1.view_qc(aif.ic_centerline1);
+                    end
+                    plott(aif, this.timesMid_)
+                otherwise
+            end
             save(aif.product);
             save(aif.pet_earlyt_on_anatomy);
             save(aif.ic_centerline);
+            this.save_idif(aif)
+        end
+        function idif = save_idif(this, aif)
+            idif.img = aif.imagingFormat.img;
+            idif.timesMid = this.timesMid;
+            fqfn = fullfile(aif.filepath, ...
+                strcat(strrep(aif.fileprefix, 'ArterialInputFunction_sample_input_function', 'Fung2013_save_idif'), ...
+                '.mat'));
+            save(fqfn, 'idif');
         end
         function c = complement_coord(this, c, idx)
             %  Args:
@@ -311,8 +366,12 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
         arterial_input_function_
         coord1_
         coord2_
+        k_
+        needs_reregistration_
         pc_threshp_
         pet_dyn_
+        t_
+        timesMid_
         verbose_
     end
 
@@ -323,8 +382,10 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
             %      arterial_anatomy (mlaif.ArterialAnatomy): factory|strategy picks ECIC|ICIC|others.
             %      coord1 (vector): for bounding box, arranged so that norm(coord1) < norm(coord2).
             %      coord2 (vector): for bounding box, arranged so that norm(coord1) < norm(coord2).
+            %      needs_reregistration (logical): never registers, even for T1w; default := false.
             %      pc_threshp (scalar): default 40% of pointCloud intensities.  
             %      pet_dyn (any): provides dynamic PET for Fung's 2013 method.
+            %      timesMid (numeric): cumsum(taus) for dynamic PET.
             %      verbose (scalar): 0 is silent; 1 provides QC; 2+ aids debugging.
             
             ip = inputParser;
@@ -332,8 +393,10 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
             addParameter(ip, "arterial_anatomy", [], @(x) isa(x, 'mlaif.ArterialAnatomy'));
             addParameter(ip, "coord1", [], @isvector);
             addParameter(ip, "coord2", [], @isvector);
+            addParameter(ip, "needs_reregistration", false, @islogical)
             addParameter(ip, "pc_threshp", 35, @isscalar);
             addParameter(ip, "pet_dyn", []);
+            addParameter(ip, 'timesMid', [], @isnumeric);
             addParameter(ip, "verbose", 1, @isscalar);
             parse(ip, varargin{:});
             ipr = ip.Results;
@@ -346,8 +409,10 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
                 this.coord1_ = ipr.coord2;
                 this.coord2_ = ipr.coord1;
             end
+            this.needs_reregistration_ = ipr.needs_reregistration;
             this.pc_threshp_ = ipr.pc_threshp;
             this.pet_dyn_ = mlfourd.ImagingContext2(ipr.pet_dyn);
+            this.timesMid_ = ipr.timesMid;
             this.verbose_ = ipr.verbose;
         end
         function that = copyElement(this)

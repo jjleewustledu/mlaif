@@ -129,7 +129,7 @@ classdef (Abstract) AbstractFung2013 < handle & matlab.mixin.Heterogeneous & mat
             if this.plotqc
                 h = figure;
                 pcshow(pointCloud(this.anatomy, 'thresh', this.threshqc*dipmax(this.anatomy)))
-                hold on; pcshow(pc.Location, '*m', 'MarkerSize', 12); hold off;
+                hold on; pcshow(pc.Location, 'm', 'MarkerSize', 12); hold off;
                 saveas(h, [fp '.fig'])
                 set(h, 'InvertHardCopy', 'off');
                 set(h,'Color',[0 0 0]); % RGB values [0 0 0] indicates black color

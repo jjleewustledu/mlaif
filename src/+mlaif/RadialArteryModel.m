@@ -282,8 +282,7 @@ classdef RadialArteryModel
         function this = adjustMapForTracer(this)
             switch upper(this.tracer)
                 case {'FDG' '18F'}
-
-                    this.map('k5') = struct('min', 20,    'max',  40,    'init', 30,    'sigma', 0.05); % t0 in sec   
+                    this.map('k5') = struct('min', 10,    'max',  40,    'init', 25,    'sigma', 0.05); % t0 in sec   
                     this.map('k6') = struct('min', 0.05,  'max',   0.5,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1)  
                     this.map('k7') = struct('min', 0.05,  'max',   0.25, 'init',  0.05, 'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
                     this.map('k8') = struct('min', 5,     'max',  20,    'init', 10,    'sigma', 0.05); % recirc delay in sec

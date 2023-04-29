@@ -37,7 +37,7 @@ classdef Test_RadialArtery < matlab.unittest.TestCase
         end
         function test_call(this)
             cd(this.workdir)
-            for g = glob('JJL*.csv')'                
+            for g = glob('JJL_1*.csv')'                
                 aif_ = readtable(g{1});
                 aif_.Properties.VariableNames = {'times', 'activityDensitiesDC'};
                 aif_.times = floor(60*aif_.times);
@@ -48,11 +48,12 @@ classdef Test_RadialArtery < matlab.unittest.TestCase
                     'kernel', 1, ...
                     'model_kind', '3bolus', ...
                     'Measurement', aif_);
-                obj = obj.solve();                
-                writetable(obj, fullfile(this.workdir, strrep(g{1}, '.csv', '_mcmc.csv')));
+                obj = obj.solve();     
+                the_csv = fullfile(this.workdir, strrep(g{1}, 'JJL_', 'JJL_mcmc_'));
+                writetable(obj, the_csv);
                 
                 figure;
-                T = readtable(fullfile(this.workdir, strrep(g{1}, '.csv', '_mcmc.csv')));
+                T = readtable(the_csv);
                 plot(aif_.times, aif_.activityDensitiesDC, 'o', T.times, T.activityDensitiesDC)
             end
         end

@@ -1,4 +1,4 @@
-classdef (Abstract) AbstractFung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
+classdef (Abstract) AbstractFung2013 < handle & mlsystem.IHandle
 	%% ABSTRACTFUNG2013 provides abstractions and reusable implementations of  
     %  Edward K Fung and Richard E Carson.  Cerebral blood flow with [15O]water PET studies using 
     %  an image-derived input function and MR-defined carotid centerlines.  

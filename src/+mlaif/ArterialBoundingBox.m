@@ -56,7 +56,7 @@ classdef ArterialBoundingBox < handle & matlab.mixin.Heterogeneous & matlab.mixi
             %  Returns:
             %      e (mlfourd.ImagingContext2): from this.imagingContext with size(e) ~ this.sizeof.
 
-            this.imagingContext_.relocateDerivatives();
+            this.imagingContext_.relocateToDerivativesFolder();
 
             o = this.originof_;
             s = this.sizeof_;
@@ -73,7 +73,7 @@ classdef ArterialBoundingBox < handle & matlab.mixin.Heterogeneous & matlab.mixi
             %                                    ins is cropped to this.size as needed.
 
             ins = mlfourd.ImagingContext2(ins);
-            ins.relocateDerivatives();
+            ins.relocateToDerivativesFolder();
 
             if 3 == ndims(ins)
                 ic = this.insert3(ins);

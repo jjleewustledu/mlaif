@@ -1,100 +1,9 @@
-classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
+classdef Fung2013 < handle & mlsystem.IHandle
     %% 
     %  
     %  Created 25-Mar-2022 15:08:41 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/src/+mlaif.
     %  Developed on Matlab 9.12.0.1884302 (R2022a) for MACI64.  Copyright 2022 John J. Lee.
     
-    methods (Static)
-        function globbed = createFromCoords(varargin)
-            %%
-            %  Args:
-            %      bids (mlpipeline.IBids): e.g., mlvg.Ccir1211Bids with prop pet_dyn_toglob.
-            %      coords (struct): e.g., 
-            %      coords = struct( ...
-            %               't1w', struct( ...
-            %                      'left',  struct( ...
-            %                               'coord1', [139 153 14], ...
-            %                               'coord2', [157 141 117]), ...
-            %                      'right', struct( ...
-            %                               'coord1', [76 154 14], ...
-            %                               'coord2', [62 141 117])), ...
-            %               'tof', struct( ...
-            %                      'left',  struct( ...
-            %                               'coord1', [500 386 37], ...
-            %                               'coord2', [388 520 90]), ...
-            %                      'right', struct( ...
-            %                               'coord1', [228 392 37], ...
-            %                               'coord2', [358 473 90])));
-            %  Returns:
-            %      globbed: cell array of globbed PET dynamic.
-
-            import mlaif.Fung2013;
-
-            ip = inputParser;
-            ip.KeepUnmatched = true;
-            addParameter(ip, 'bids', [], @(x) isa(x, 'mlpipeline.IBids'));
-            addParameter(ip, 'coords', [], @isstruct);
-            parse(ip, varargin{:});
-            ipr = ip.Results;
-
-            globbed = globT(ipr.bids.pet_dyn_toglob);
-            for t = {'tof', 't1w'}
-                t_ = t{1};
-                for h = {'left', 'right'}
-                    h_ = h{1};
-                    for ig = 1:length(globbed)
-                        try
-                            f = Fung2013.(strcat('createFor', upper(t_(1)),t_(2:end)))( ...
-                                'coord1', ipr.coords.(t_).(h_).coord1, ...
-                                'coord2', ipr.coords.(t_).(h_).coord2, ...
-                                'use_cache', true, varargin{:});
-                            call(f, 'pet_dyn', globbed{ig});
-                        catch ME
-                            handwarning(ME);
-                        end
-                    end
-                end
-            end
-        end
-        function this = createForT1w(varargin)
-            %% Args:
-            %      bids (mlpipeline.IBids)
-            %      verbose (scalar): 0 is silent; default 1 provides QC; 2+ aids debugging.
-
-            aa = mlaif.ArterialAnatomy.createForT1w(varargin{:});
-            this = mlaif.Fung2013('arterial_anatomy', aa, varargin{:});
-        end
-        function this = createForTof(varargin)
-            %% Args:
-            %      bids (mlpipeline.IBids)
-            %      verbose (scalar): 0 is silent; default 1 provides QC; 2+ aids debugging.
-
-            aa = mlaif.ArterialAnatomy.createForTof(varargin{:});
-            this = mlaif.Fung2013('arterial_anatomy', aa, varargin{:});
-        end
-        function this = createForTofOnT1w(varargin)
-            %% Args:
-            %      bids (mlpipeline.IBids)
-            %      verbose (scalar): 0 is silent; default 1 provides QC; 2+ aids debugging.
-
-            aa = mlaif.ArterialAnatomy.createForTofOnT1w(varargin{:});
-            this = mlaif.Fung2013('arterial_anatomy', aa, varargin{:});
-        end
-        function viewAnat(varargin)
-            %% 
-            % Args:
-            %      bids (mlpipeline.IBids)
-
-            ip = inputParser;
-            addRequired(ip, 'bids', [], @(x) isa(x, 'mlpipeline.IBids'));
-            parse(ip, varargin{:});
-            ipr = ip.Results;
-
-            ipr.bids.t1w_ic.view();
-            ipr.bids.tof_ic.view();
-        end
-    end
-
     properties (Dependent)
         anatomy
         arterialAnatClass % text for logging
@@ -128,10 +37,7 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
         N_centerline_samples
     end
 
-    methods
-
-        %% GET
-
+    methods % GET, SET
         function g = get.anatomy(this)
             g = this.arterial_anatomy_.anatomy;
         end
@@ -232,10 +138,10 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
                 return
             end
         end
+    end
 
-        %%
-
-        function idif = call(this, varargin)
+    methods
+        function idif_ic = call(this, varargin)
             %  Args:
             %      coord1 (vector):  updates values from ctor.
             %      coord2 (vector):  updates values from ctor.
@@ -247,7 +153,7 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
             %      t (vector): [0 0 0 0 0.2 0.4 0.6 0.8 1 1 1 1] for ECIC;
             %                  [0 0 0 0 0 0.5 0.7 1 1 1 1 1] for ICIC.
             %  Returns:
-            %      idif (struct):  containing vectors img, timesMid
+            %      idif_ic (mlfourd.ImagingContext2):  containing vector img, timesMid in json
 
             ip = inputParser;
             addParameter(ip, 'coord1', this.coord1, @isvector);
@@ -268,6 +174,7 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
             this.k_ = ipr.k;
             this.t_ = ipr.t;
 
+            % do arterial segmentation
             this.arterial_segmentation_ = mlaif.ArterialSegmentation( ...
                 'fung2013', this, ...
                 'use_cache', ipr.use_cache);
@@ -287,6 +194,7 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
                 otherwise
             end
 
+            % build arterial centerline
             this.arterial_centerline_ = mlaif.ArterialCenterline( ...
                 'fung2013', this, ...
                 'segmentation', this.arterial_segmentation_.product, ...
@@ -307,6 +215,7 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
                 otherwise
             end
 
+            % build arterial input functions
             this.arterial_input_function_ = mlaif.ArterialInputFunction( ...
                 'fung2013', this, ...
                 'segmentation', this.arterial_segmentation_.product, ...
@@ -329,15 +238,7 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
             save(aif.product);
             save(aif.pet_earlyt_on_anatomy);
             save(aif.ic_centerline);
-            this.save_idif(aif)
-        end
-        function idif = save_idif(this, aif)
-            idif.img = aif.imagingFormat.img;
-            idif.timesMid = this.timesMid;
-            fqfn = fullfile(aif.filepath, ...
-                strcat(strrep(aif.fileprefix, 'ArterialInputFunction_sample_input_function', 'Fung2013_save_idif'), ...
-                '.mat'));
-            save(fqfn, 'idif');
+            idif_ic = this.save_idif(aif);
         end
         function c = complement_coord(this, c, idx)
             %  Args:
@@ -354,6 +255,97 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
         end
         function ic = pet_dyn_on_anatomy(this, pet_dyn, f)
             ic = this.arterial_anatomy_.pet_dyn_on_anatomy(pet_dyn, f);
+        end
+    end
+
+    methods (Static)
+        function globbed = createFromCoords(varargin)
+            %%
+            %  Args:
+            %      bids (mlpipeline.IBids): e.g., mlvg.Ccir1211Bids with prop pet_dyn_toglob.
+            %      coords (struct): e.g., 
+            %      coords = struct( ...
+            %               't1w', struct( ...
+            %                      'left',  struct( ...
+            %                               'coord1', [139 153 14], ...
+            %                               'coord2', [157 141 117]), ...
+            %                      'right', struct( ...
+            %                               'coord1', [76 154 14], ...
+            %                               'coord2', [62 141 117])), ...
+            %               'tof', struct( ...
+            %                      'left',  struct( ...
+            %                               'coord1', [500 386 37], ...
+            %                               'coord2', [388 520 90]), ...
+            %                      'right', struct( ...
+            %                               'coord1', [228 392 37], ...
+            %                               'coord2', [358 473 90])));
+            %  Returns:
+            %      globbed: cell array of globbed PET dynamic.
+
+            import mlaif.Fung2013;
+
+            ip = inputParser;
+            ip.KeepUnmatched = true;
+            addParameter(ip, 'bids', [], @(x) isa(x, 'mlpipeline.IBids'));
+            addParameter(ip, 'coords', [], @isstruct);
+            parse(ip, varargin{:});
+            ipr = ip.Results;
+
+            globbed = globT(ipr.bids.pet_dyn_toglob);
+            for t = {'tof', 't1w'}
+                t_ = t{1};
+                for h = {'left', 'right'}
+                    h_ = h{1};
+                    for ig = 1:length(globbed)
+                        try
+                            f = Fung2013.(strcat('createFor', upper(t_(1)),t_(2:end)))( ...
+                                'coord1', ipr.coords.(t_).(h_).coord1, ...
+                                'coord2', ipr.coords.(t_).(h_).coord2, ...
+                                'use_cache', true, varargin{:});
+                            call(f, 'pet_dyn', globbed{ig});
+                        catch ME
+                            handwarning(ME);
+                        end
+                    end
+                end
+            end
+        end
+        function this = createForT1w(varargin)
+            %% Args:
+            %      bids (mlpipeline.IBids)
+            %      verbose (scalar): 0 is silent; default 1 provides QC; 2+ aids debugging.
+
+            aa = mlaif.ArterialAnatomy.createForT1w(varargin{:});
+            this = mlaif.Fung2013('arterial_anatomy', aa, varargin{:});
+        end
+        function this = createForTof(varargin)
+            %% Args:
+            %      bids (mlpipeline.IBids)
+            %      verbose (scalar): 0 is silent; default 1 provides QC; 2+ aids debugging.
+
+            aa = mlaif.ArterialAnatomy.createForTof(varargin{:});
+            this = mlaif.Fung2013('arterial_anatomy', aa, varargin{:});
+        end
+        function this = createForTofOnT1w(varargin)
+            %% Args:
+            %      bids (mlpipeline.IBids)
+            %      verbose (scalar): 0 is silent; default 1 provides QC; 2+ aids debugging.
+
+            aa = mlaif.ArterialAnatomy.createForTofOnT1w(varargin{:});
+            this = mlaif.Fung2013('arterial_anatomy', aa, varargin{:});
+        end
+        function viewAnat(varargin)
+            %% 
+            % Args:
+            %      bids (mlpipeline.IBids)
+
+            ip = inputParser;
+            addRequired(ip, 'bids', [], @(x) isa(x, 'mlpipeline.IBids'));
+            parse(ip, varargin{:});
+            ipr = ip.Results;
+
+            ipr.bids.t1w_ic.view();
+            ipr.bids.tof_ic.view();
         end
     end
 
@@ -424,6 +416,12 @@ classdef Fung2013 < handle & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
             that.arterial_centerline_ = copy(this.arterial_centerline_);
             that.arterial_input_function_ = copy(this.arterial_input_function_);
             that.pet_dyn_ = copy(this.pet_dyn_);
+        end
+        function idif_ic = save_idif(this, aif)
+            idif_ic = aif.product;
+            idif_ic.filepath = aif.filepath;
+            idif_ic.fileprefix = sprintf("%s_%s", this.pet_dyn_.fileprefix, stackstr(3));
+            idif_ic.save();
         end
     end
     

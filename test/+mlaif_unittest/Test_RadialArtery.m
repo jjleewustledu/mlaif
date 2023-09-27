@@ -6,7 +6,7 @@ classdef Test_RadialArtery < matlab.unittest.TestCase
     %  Developed on Matlab 9.14.0.2239454 (R2023a) Update 1 for MACI64.  Copyright 2023 John J. Lee.
     
     properties
-        aif % table with vars:  times, activityDensities
+        aif % table with vars:  times, activityDensity
         testObj % mlaif.RadialArtery
         units % struct
         workdir = "/Users/jjlee/Library/CloudStorage/Box-Box/Matt Brier"
@@ -33,16 +33,17 @@ classdef Test_RadialArtery < matlab.unittest.TestCase
             %disp(T)
 
             figure;
-            plot(this.aif.times, this.aif.activityDensitiesDC, 'o', T.times, T.activityDensitiesDC)
+            plot(this.aif.times, this.aif.activityDensityDC, 'o', T.times, T.activityDensityDC)
         end
         function test_call(this)
             cd(this.workdir)
             for g = glob('JJL_1*.csv')'                
-                aif_ = readtable(g{1});
-                aif_.Properties.VariableNames = {'times', 'activityDensitiesDC'};
+                aif_ori = readtable(g{1});
+                aif_ = aif_ori;
+                aif_.Properties.VariableNames = {'times', 'activityDensityDC'};
                 aif_.times = floor(60*aif_.times);
                 factor = 2.^(-aif_.times/6582);
-                aif_.activityDensities = 37000 * aif_.activityDensitiesDC .* factor;
+                aif_.activityDensity = 37000 * aif_.activityDensityDC .* factor;
                 obj = mlaif.RadialArtery( ...
                     'tracer', 'FDG', ...
                     'kernel', 1, ...
@@ -52,9 +53,13 @@ classdef Test_RadialArtery < matlab.unittest.TestCase
                 the_csv = fullfile(this.workdir, strrep(g{1}, 'JJL_', 'JJL_mcmc_'));
                 writetable(obj, the_csv);
                 
-                figure;
+                h = figure;
                 T = readtable(the_csv);
-                plot(aif_.times, aif_.activityDensitiesDC, 'o', T.times, T.activityDensitiesDC)
+                plot(aif_ori.Time_m_, aif_.activityDensityDC, 'o', T.times, T.activityDensityDC)
+                title(the_csv, Interpreter='none');
+                ylabel('decay-corr. activity (\muC/mL)', FontSize=18)
+                xlabel('time (min)', FontSize=18)
+                savemyfig(h, strrep(the_csv, '.csv', ''))
             end
         end
     end
@@ -63,15 +68,19 @@ classdef Test_RadialArtery < matlab.unittest.TestCase
         function setupRadialArtery(this)
             import mlaif.*  
             this.aif = readtable(fullfile(this.workdir, "JJL_1179206_a.csv"));
-            this.aif.Properties.VariableNames = {'times', 'activityDensitiesDC'};
-            this.aif.times = floor(60*this.aif.times);
-            factor = 2.^(-this.aif.times/6582);
-            this.aif.activityDensities = 37000 * this.aif.activityDensitiesDC .* factor;
+            this.aif.Properties.VariableNames = {'times', 'activityDensityDC'};
+            %this.aif.times = floor(60*this.aif.times);
+            %factor = 2.^(-this.aif.times/6582);
+            %this.aif.activityDensity = 37000 * this.aif.activityDensityDC .* factor;
+            this.units.times = 'min';
+            this.units.activityDensityDC = 'uCi/mL';
+
             this.testObj_ = RadialArtery( ...
-                'tracer', 'FDG', ...
-                'kernel', 1, ...
-                'model_kind', '3bolus', ...
-                'Measurement', this.aif);
+                this.aif, ...
+                this.units, ...
+                tracer='FDG', ...
+                model_kind='3bolus', ...
+                kernel=1);
         end
     end
     

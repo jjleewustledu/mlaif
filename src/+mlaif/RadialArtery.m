@@ -6,11 +6,13 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
     %  Developed on Matlab 9.14.0.2239454 (R2023a) Update 1 for MACI64.  Copyright 2023 John J. Lee.
     
 	properties  
-        measurement % expose for performance when used strategies for solve
+        Measurement % expose for performance when used strategies for solve
         model       %
+        units
     end
 
     properties (Dependent)
+        varNameDecayCorrected
         strategy
     end
 
@@ -18,12 +20,21 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
         function g = get.strategy(this)
             g = this.strategy_;
         end
+        function g = get.varNameDecayCorrected(this)
+            vars = this.Measurement.Properties.VariableNames;
+            indicator_dc = contains(vars, 'dc', IgnoreCase=true) | contains(vars, 'decay', IgnoreCase=true);
+            if any(indicator_dc)
+                g = vars{indicator_dc};
+                return
+            end
+            g = [];
+        end
     end
 
     methods
-        function this = RadialArtery(varargin)
+        function this = RadialArtery(Measurement, units, opts)
             %% RADIALARTERY 
-            %  @param Measurement is a table:  [times, ]activityDensities in [sec, ]Bq/mL.
+            %  @param Measurement is a table:  [times, ]activityDensity in [sec, ]Bq/mL.
             %  @param solver is in {'simulanneal'}.
 
             %  for mlaif.RadialArteryModel: 
@@ -36,33 +47,34 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
             %  for mlaif.RadialArterySimulAnneal:
             %  @param context is mlaif.RadialArtery.
             %  @param fileprefix.
-            
-            ip = inputParser;
-            ip.KeepUnmatched = true;
-            addParameter(ip, 'Measurement', [], @istable);
-            addParameter(ip, 'solver', 'simulanneal', @ischar);
-            parse(ip, varargin{:});
-            ipr = ip.Results;
-            this.measurement = ipr.Measurement;
-            vns = this.measurement.Properties.VariableNames;
-            assert(strcmp('times', vns{1}))
-            assert(strcmp('activityDensities', vns{end}))
 
- 			this.model = mlaif.RadialArteryModel(varargin{:});
+            arguments
+                Measurement table
+                units struct
+                opts.solver string {mustBeTextScalar} = "simulanneal"
+                opts.tracer {mustBeTextScalar} = 'FDG'
+                opts.model_kind {mustBeTextScalar} = '3bolus'
+                opts.kernel double = 1
+            end
+            
+            this.Measurement = Measurement;
+            this.units = units;
+ 			this.model = mlaif.RadialArteryModel( ...
+                tracer=opts.tracer, model_kind=opts.model_kind, kernel=opts.kernel);
+            this.standardize_ctor_args();
                         
-            switch lower(ipr.solver)
-                case 'simulanneal'
-                    this.strategy_ = mlaif.RadialArterySimulAnneal( ...
-                        'context', this, varargin{:});
+            switch opts.solver
+                case "simulanneal"
+                    this.strategy_ = mlaif.RadialArterySimulAnneal(context=this);
                 otherwise
-                    error('mlaif:NotImplementedError', ...
-                        'RadialArtery.ipr.solver->%s', ipr.solver)
+                    error("mlaif:NotImplementedError", ...
+                        "RadialArtery.ipr.solver->%s", ipr.solver)
             end
         end
 
         function rho = deconvolved(this)
-            M0 = max(this.measurement.activityDensities);
-            N = floor(this.measurement.times(end)) + 1;
+            M0 = max(this.Measurement.activityDensity);
+            N = floor(this.Measurement.times(end)) + 1;
             ks = this.strategy_.ks;
             mdl = this.model;
             rho = M0*this.model.deconvolved(ks, N, mdl.kernel, mdl.tracer, mdl.model_kind);
@@ -98,6 +110,41 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
             
             that = copyElement@matlab.mixin.Copyable(this);
             that.strategy_ = copy(this.strategy_);
+        end
+        function standardize_ctor_args(this)
+            if 1 == length(this.Measurement.Properties.VariableNames)
+                % assume activityDensity is sampled at 1 Hz
+                times = 0:size(this.Measurement,1)-1;
+                this.Measurement = addvars(this.Measurement, times, 1);
+            end
+            switch lower(char(this.units.times)) % convert times to seconds
+                case {'s', 'sec', 'second', 'seconds'}
+                case {'m', 'min', 'minute', 'minutes'}
+                    this.Measurement.times = round(60*this.Measurement.times);
+                case {'h', 'hr', 'hour', 'hours'}
+                    this.Measurement.times = round(3600*this.Measurement.times);
+                otherwise
+                    error("mlaif:ValueError", ...
+                        "RadialArtery.standardize_ctor_args.this.units.times->%s", this.units.times)
+            end
+            if ~isempty(this.varNameDecayCorrected)
+                % convert external decay corrections to decay uncorreted
+                factor = 2.^(-this.Measurement.times/this.model.halflife);
+                this.Measurement.activityDensity = this.Measurement.(this.varNameDecayCorrected).*factor;
+                this.units.activityDensity = this.units.(this.varNameDecayCorrected);
+            end
+            switch lower(char(this.units.activityDensity)) % convert activityDensity to Bq/mL
+                case {'bqml', 'bq/ml'}
+                case {'kbqml', 'kbq/ml'}
+                    this.Measurement.activityDensity = 1e3*this.Measurement.activityDensity;
+                case {'mbqml', 'mbq/ml'}
+                    this.Measurement.activityDensity = 1e6*this.Measurement.activityDensity;
+                case {'uciml', 'uci/ml'}
+                    this.Measurement.activityDensity = 37e3*this.Measurement.activityDensity;
+                otherwise
+                    error("mlaif:ValueError", ...
+                        "RadialArtery.standardize_ctor_args.this.units.activityDensity->%s", this.units.activityDensity)
+            end
         end
     end
     

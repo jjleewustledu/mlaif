@@ -19,36 +19,35 @@ classdef RadialArteryModel
     end
 
 	methods		  
- 		function this = RadialArteryModel(varargin)
- 			%% RADIALARTERYLEE2021MODEL
- 			%  @param tracer is char.
-            %  @param  model_kind is char.
-            %  @param map is containers.Map.
-            %  @param kernel is numeric.
-            %  @param t0_forced is scalar, default empty.
-            %  @param times_sampled is numeric.
+ 		function this = RadialArteryModel(opts)
+            %%  Args:
+            %   opts.tracer {mustBeTextScalar} = 'FDG'
+            %   opts.model_kind = '3bolus'
+            %   opts.kernel double = 1
+            %   opts.map = []
+            %   opts.t0_forced = []
+            %   opts.times_sampled = []
             
-            import mlaif.RadialArteryModel.preferredMap
-            
-            ip = inputParser;
-            ip.PartialMatching = false;
-            ip.KeepUnmatched = true;
-            addParameter(ip, 'tracer', [], @ischar)
-            addParameter(ip, 'model_kind', [], @ischar)
-            addParameter(ip, 'map', preferredMap(), @(x) isa(x, 'containers.Map'))
-            addParameter(ip, 'kernel', 1, @isnumeric)
-            addParameter(ip, 't0_forced', [], @isnumeric)
-            addParameter(ip, 'times_sampled', [], @isnumeric)
-            parse(ip, varargin{:})
-            ipr = ip.Results;
-            this.tracer = upper(ipr.tracer);
-            this.model_kind = ipr.model_kind;
-            this.map = ipr.map;
-            this.t0_forced = ipr.t0_forced;
+            arguments
+                opts.tracer {mustBeTextScalar} = 'FDG'
+                opts.model_kind = '3bolus'
+                opts.kernel double = 1
+                opts.map = []
+                opts.t0_forced = []
+                opts.times_sampled = []
+            end
+            if isempty(opts.map)
+                opts.map = mlaif.RadialArteryModel.preferredMap();
+            end
+
+            this.tracer = upper(opts.tracer);
+            this.model_kind = opts.model_kind;
+            this.map = opts.map;
+            this.t0_forced = opts.t0_forced;
             this = this.adjustMapForTracer();
             this = this.adjustMapForModelKind();
-            this.kernel = ipr.kernel;
-            this.times_sampled = ipr.times_sampled; 			
+            this.kernel = opts.kernel;
+            this.times_sampled = opts.times_sampled; 			
  		end
     end 
 
@@ -62,7 +61,7 @@ classdef RadialArteryModel
         function rho = decay_corrected_from_table(T, tracer)
             import mlaif.RadialArteryModel.halflife
             times = T.times;
-            rho = T.activityDensities;
+            rho = T.activityDensity;
             rho = rho .* 2.^(times/halflife(tracer));
             rho = asrow(rho);
         end
@@ -79,6 +78,10 @@ classdef RadialArteryModel
             rho = (1 - baseline_frac)*(card_kernel/max_sk)*soln; 
         end
         function tau = halflife(tracer)
+            arguments
+                tracer char {mustBeTextScalar} = '18F'
+            end
+
             switch upper(tracer)
                 case {'FDG' '18F'}
                     tau = 1.82951 * 3600; % +/- 0.00034 h * sec/h
@@ -97,7 +100,7 @@ classdef RadialArteryModel
             times_ = asrow(Measurement.times); % discrete
             indices_ = floor(times_) + 1; % discrete
             N = floor(times_(end)) + 1; % interpolated
-            measurement_ = asrow(Measurement.activityDensities); % discrete
+            measurement_ = asrow(Measurement.activityDensity); % discrete
 
             estimation = sampled(ks, N, kernel, tracer, model_kind); % \in [0 1]
             estimation_ = estimation(indices_);

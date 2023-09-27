@@ -217,14 +217,14 @@ classdef ArterialInputFunction < handle & matlab.mixin.Heterogeneous & matlab.mi
             ipr = ip.Results;
             this.fung2013_ = ipr.fung2013;
             this.segmentation_ = ipr.segmentation;
-            this.segmentation_.relocateDerivatives();
+            this.segmentation_.relocateToDerivativesFolder();
             this.ic_centerline_ = ipr.ic_centerline;
-            this.ic_centerline_.relocateDerivatives();
+            this.ic_centerline_.relocateToDerivativesFolder();
             this.fung2013_.imdilate_scale_mm = ipr.imdilate_scale_mm;
             this.fung2013_.imdilate_strel = ipr.imdilate_strel;
             this.pc_centerline_ = ipr.pc_centerline;
             this.pet_dyn_ = ipr.pet_dyn;
-            this.pet_dyn_.relocateDerivatives()
+            this.pet_dyn_.relocateToDerivativesFolder()
             this.use_cache_ = ipr.use_cache;
 
             if this.use_cache_ && isfile(this.cache_file)

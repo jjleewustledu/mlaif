@@ -32,7 +32,7 @@ classdef AifData < handle
         normalizationFactor % recovery coefficient for IDIF; empirical rescaling for debugging measurements of AIF.
         stableToInterpolation % logical.  Indicates that makima, pchip and related interpolators are safe for use.
         T % seconds.  The duration at the start of artery_interpolated used by models but not recorded by scanner time-frames.
-        tArterialForced % see mlsiemens.BiographKit.alignArterialToScanner()
+        tArterialForced % prefer TwiliteDevice.t0_forced, RadialArteryLee2021Model.t0_forced.
         tBuffer % seconds.  artery_interpolated(tBuffer + 1) corresponds to the first scanner time-frame.
     end
 

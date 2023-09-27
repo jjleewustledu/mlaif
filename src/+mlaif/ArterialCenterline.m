@@ -105,7 +105,7 @@ classdef ArterialCenterline < handle & matlab.mixin.Heterogeneous & matlab.mixin
             ipr = ip.Results;
             this.fung2013_ = ipr.fung2013;
             this.segmentation_ = ipr.segmentation;
-            this.segmentation_.relocateDerivatives();
+            this.segmentation_.relocateToDerivativesFolder();
             this.use_cache_ = ipr.use_cache;
 
             this.hunyadi_ = mlvg.Hunyadi2021(); % adds package bspline to Matlab's path

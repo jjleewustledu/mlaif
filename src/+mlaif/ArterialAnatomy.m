@@ -185,7 +185,7 @@ classdef (Abstract) ArterialAnatomy < handle & matlab.mixin.Heterogeneous & matl
             if ~contains(pet.fileprefix, '_avgt') && ~contains(pet.fileprefix, 'static')
                 pet = pet.timeAveraged();
             end
-            pet.relocateDerivatives();
+            pet.relocateToDerivativesFolder();
 
             if ~isfile(pet.fqfn)
                 save(pet);
@@ -215,7 +215,7 @@ classdef (Abstract) ArterialAnatomy < handle & matlab.mixin.Heterogeneous & matl
             pet_dyn = mlfourd.ImagingContext2(pet_dyn);
             assert(ndims(pet_dyn) == 4);
             assert(isa(f, 'mlfsl.Flirt'));
-            pet_dyn.relocateDerivatives();
+            pet_dyn.relocateToDerivativesFolder();
             
             if ~isfile(pet_dyn.fqfn)
                 save(pet_dyn);

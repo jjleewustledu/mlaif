@@ -1,4 +1,4 @@
-classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
+classdef RadialArterySimulAnneal < mlio.AbstractIO
     %% line1
     %  line2
     %  
@@ -13,13 +13,23 @@ classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
         visualize = false
         visualize_anneal = false
         zoom = 1
- 	end
+    end
+
+	properties
+        context
+        Measurement          % external data
+        map                  % 
+        model                %
+        sigma0 = 0.05        % fraction of Measurement < 1
+        times_sampled        % numeric times for Measurement; midpoints of frames for PET
+    end
     
 	properties (Dependent) 
         kernel  
         ks
         ks_names
         model_kind
+        results
         tracer
     end
 
@@ -35,6 +45,9 @@ classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
         end
         function g = get.model_kind(this)
             g = this.model.model_kind;
+        end
+        function g = get.results(this)
+            g = this.results_;
         end
         function g = get.tracer(this)
             g = this.model.tracer;
@@ -71,9 +84,9 @@ classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
             sampled = @mlaif.RadialArteryModel.sampled;
             decay_corrected = @mlaif.RadialArteryModel.decay_corrected;
             decay_corrected_from_table = @mlaif.RadialArteryModel.decay_corrected_from_table;
-            M_activityDensities = decay_corrected_from_table(this.Measurement, this.tracer);
+            M_activityDensity = decay_corrected_from_table(this.Measurement, this.tracer);
             N = this.Measurement.times(end) + 1;
-            M0 = max(M_activityDensities);
+            M0 = max(M_activityDensity);
             
             h = figure;
             samp = M0*sampled(this.ks, N, this.kernel, this.tracer, this.model_kind);
@@ -90,13 +103,13 @@ classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
                 leg_kern = 'kernel';
             end
             if ipr.showKernel
-                plot(asrow(this.Measurement.times), asrow(M_activityDensities), 'o', ...
+                plot(asrow(this.Measurement.times), asrow(M_activityDensity), 'o', ...
                     times, samp, ':', ...
                     times, deconvolved, '-', ...
                     times, this.zoom*this.kernel, '--', 'LineWidth', 2)
                 legend({'measured', 'estimated', 'deconvolved', leg_kern})
             else
-                plot(asrow(this.Measurement.times), asrow(M_activityDensities), 'o', ...
+                plot(asrow(this.Measurement.times), asrow(M_activityDensity), 'o', ...
                     times, samp, ':', 'LineWidth', 2)
                 legend({'measured', 'estimated'}, 'FontSize', 10)
             end
@@ -118,7 +131,7 @@ classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
             this.zoom = ipr.zoom;
             M = this.Measurement;
             N = M.times(end) + 1;
-            M0 = max(M.activityDensities);
+            M0 = max(M.activityDensity);
                         
             h = figure;
             samp = M0*this.model.sampled(this.ks, N, this.kernel, this.tracer, this.model_kind);
@@ -134,13 +147,13 @@ classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
                 leg_kern = 'kernel';
             end
             if ipr.showKernel
-                plot(asrow(M.times), asrow(M.activityDensities), 'o', ...
+                plot(asrow(M.times), asrow(M.activityDensity), 'o', ...
                     times, samp, ':', ...
                     times, deconvolved, '-', ...
                     times, this.zoom*this.kernel, '--', 'LineWidth', 2)
                 legend({'measured', 'estimated', 'deconvolved', leg_kern})
             else
-                plot(asrow(M.times), asrow(M.activityDensities), 'o', ...
+                plot(asrow(M.times), asrow(M.activityDensity), 'o', ...
                     times, samp, ':', 'LineWidth', 2)
                 legend({'measured', 'estimated'}, 'FontSize', 10)
             end
@@ -218,23 +231,46 @@ classdef RadialArterySimulAnneal < mloptimization.SimulatedAnnealing
             end
         end
         function writetable(this, fqfn)
-            M0 = max(this.Measurement.activityDensities);
+            M0 = max(this.Measurement.activityDensity);
             N = floor(this.Measurement.times(end)) + 1;
-            activityDensitiesDC = ascol(M0*this.model.sampled(this.ks, N, this.kernel, this.tracer, this.model_kind));
-            times = (0:length(activityDensitiesDC)-1)'; % sec
-            activityDensitiesDC = activityDensitiesDC .* 2.^(times/6582);
-            activityDensitiesDC = activityDensitiesDC/37000;
-            T = table(times, activityDensitiesDC);
+            activityDensityDC = ascol(M0*this.model.sampled(this.ks, N, this.kernel, this.tracer, this.model_kind));
+            times = (0:length(activityDensityDC)-1)'; % sec
+            activityDensityDC = activityDensityDC .* 2.^(times/6582);
+            activityDensityDC = activityDensityDC/37000;
+            times = times/60;
+            T = table(times, activityDensityDC);
             writetable(T, fqfn);
         end
 
- 		function this = RadialArterySimulAnneal(varargin)
-            this = this@mloptimization.SimulatedAnnealing(varargin{:}); 			
+        function this = RadialArterySimulAnneal(opts)
+            %%  Args:
+            %   context
+            %   opts.sigma0 double {mustBeScalarOrEmpty} = []
+            
+            arguments
+                opts.context
+                opts.sigma0 double {mustBeScalarOrEmpty} = []
+            end
+            if isempty(opts.sigma0)
+                opts.sigma0 = this.sigma0;
+            end
+            
+            this.context = opts.context;
+            this.model = this.context.model;               % copy objects for speed            
+            this.map = this.model.map;                     %
+            this.Measurement = this.context.Measurement;   %
+            this.times_sampled = this.model.times_sampled; % 
+            this.sigma0 = opts.sigma0;
+
             [this.ks_lower,this.ks_upper,this.ks0] = remapper(this);
  		end
     end
     
     %% PROTECTED
+    
+    properties (Access = protected)
+        results_
+    end
     
     methods (Access = protected)
         function [m,sd] = find_result(this, lbl)

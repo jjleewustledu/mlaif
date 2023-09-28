@@ -6,6 +6,7 @@ classdef MipIdif < handle & mlsystem.IHandle
     
     properties (Dependent)
         centerline_on_pet
+        centerline_source
         halflife
         pet_avgt % w/o decay-correction, weighted by taus
         pet_avgt_on_tof
@@ -32,6 +33,13 @@ classdef MipIdif < handle & mlsystem.IHandle
                 end
             end
             g = copy(this.centerline_on_pet_);
+        end
+        function g = get.centerline_source(this)
+            globbed = glob( ...
+                convertStringsToChars( ...
+                fullfile(this.centerline_on_pet.filepath, "sub-*_ses-*_trc-*Static.nii.gz")));
+            assert(~isempty(globbed), stackstr())
+            g = mlfourd.ImagingContext2(globbed{1});
         end
         function g = get.halflife(this)
             rn = this.tracer_kit_.make_radionuclides();
@@ -477,6 +485,43 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             %this.arterial_centerline_ = [];
             %this.arterial_input_function_ = [];
+        end
+        function out_ic = flirt_centerline(this, target, target_trc)
+            arguments
+                this mlkinetics.MipIdif
+                target {mustBeNonempty}
+                target_trc {mustBeTextScalar} = "unknown"
+            end
+            target = mlfourd.ImagingContext2(target);
+
+            % flirt
+            cl = this.centerline_on_pet;
+            source = this.centerline_source;
+            source_on_target = mlfourd.ImagingContext2( ...
+                source.fqfp+"_on_"+target_trc+".nii.gz");
+            cl_flirt = mlfsl.Flirt( ...
+                'in', source, ...
+                'ref', target, ...
+                'out', source_on_target, ...
+                'omat', this.mat(source_on_target), ...
+                'bins', 256, ...
+                'cost', 'mutualinfo', ...
+                'dof', 6, ...
+                'interp', 'spline', ...
+                'noclobber', false);
+            if ~isfile(source_on_trc.fqfn)
+                % do expensive coreg.
+                cl_flirt.flirt();
+            end
+            assert(isfile(source_on_trc.fqfn))
+
+            % applyxfm
+            out_ic = mlfourd.ImagingContext2( ...
+                fullfile(target.filepath, "centerline_on_"+target_trc+"nii.gz"));
+            cl_flirt.in = cl;
+            cl_flirt.out = out_ic;
+            cl_flirt.interp = "nearestneighbour";
+            cl_flirt.applyXfm();
         end
         function [ic] = pet_static_on_anatomy(this)
             ic = this.pet_avgt_on_tof;

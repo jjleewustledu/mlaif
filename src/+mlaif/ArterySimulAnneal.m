@@ -1,4 +1,4 @@
-classdef RadialArterySimulAnneal < mlio.AbstractIO
+classdef ArterySimulAnneal < mlio.AbstractIO
     %% line1
     %  line2
     %  
@@ -56,7 +56,7 @@ classdef RadialArterySimulAnneal < mlio.AbstractIO
 
     methods
         function fprintfModel(this)
-            fprintf('RadialArterySimulAnnel:\n');  
+            fprintf('ArterySimulAnneal:\n');  
             fprintf('%s %s:\n', this.tracer, this.model_kind); 
             for ky = 1:length(this.ks)
                 fprintf('\t%s = %g\n', this.ks_names{ky}, this.ks(ky));
@@ -79,20 +79,23 @@ classdef RadialArterySimulAnneal < mlio.AbstractIO
             addParameter(ip, 'zoom', 1, @isnumeric)
             parse(ip, varargin{:})
             ipr = ip.Results;
+            if ~isvector(this.kernel)
+                ipr.showKernel = false;
+            end
             this.zoom = ipr.zoom;
-            deconvolved = @mlaif.RadialArteryModel.deconvolved;
-            sampled = @mlaif.RadialArteryModel.sampled;
-            decay_corrected = @mlaif.RadialArteryModel.decay_corrected;
-            decay_corrected_from_table = @mlaif.RadialArteryModel.decay_corrected_from_table;
+            deconvolved = @mlaif.ArteryModel.deconvolved;
+            sampled = @mlaif.ArteryModel.sampled;
+            decay_corrected = @mlaif.ArteryModel.decay_corrected;
+            decay_corrected_from_table = @mlaif.ArteryModel.decay_corrected_from_table;
             M_activityDensity = decay_corrected_from_table(this.Measurement, this.tracer);
-            N = this.Measurement.times(end) + 1;
+            N = size(this.Measurement, 1);
             M0 = max(M_activityDensity);
             
             h = figure;
             samp = M0*sampled(this.ks, N, this.kernel, this.tracer, this.model_kind);
             samp = decay_corrected(samp, this.tracer, 1:N);
             deconvolved = M0*deconvolved(this.ks, N, this.kernel, this.tracer, this.model_kind);
-            times = 0:N-1;
+            timesMid = 0.5:N-0.5;
             
             if isempty(this.zoom)
                 this.zoom = max(deconvolved)/max(this.kernel)/2;
@@ -103,14 +106,14 @@ classdef RadialArterySimulAnneal < mlio.AbstractIO
                 leg_kern = 'kernel';
             end
             if ipr.showKernel
-                plot(asrow(this.Measurement.times), asrow(M_activityDensity), 'o', ...
-                    times, samp, ':', ...
-                    times, deconvolved, '-', ...
-                    times, this.zoom*this.kernel, '--', 'LineWidth', 2)
+                plot(asrow(this.Measurement.timesMid), asrow(M_activityDensity), 'o', ...
+                    timesMid, samp, ':', ...
+                    timesMid, deconvolved, '-', ...
+                    timesMid, this.zoom*this.kernel, '--', 'LineWidth', 2)
                 legend({'measured', 'estimated', 'deconvolved', leg_kern})
             else
-                plot(asrow(this.Measurement.times), asrow(M_activityDensity), 'o', ...
-                    times, samp, ':', 'LineWidth', 2)
+                plot(asrow(this.Measurement.timesMid), asrow(M_activityDensity), 'o', ...
+                    timesMid, samp, ':', 'LineWidth', 2)
                 legend({'measured', 'estimated'}, 'FontSize', 10)
             end
             if ~isempty(ipr.xlim); xlim(ipr.xlim); end
@@ -128,15 +131,18 @@ classdef RadialArterySimulAnneal < mlio.AbstractIO
             addParameter(ip, 'zoom', 1, @isnumeric)
             parse(ip, varargin{:})
             ipr = ip.Results;
+            if ~isvector(this.kernel)
+                ipr.showKernel = false;
+            end
             this.zoom = ipr.zoom;
             M = this.Measurement;
-            N = M.times(end) + 1;
+            N = M.timesMid(end) + 1;
             M0 = max(M.activityDensity);
                         
             h = figure;
             samp = M0*this.model.sampled(this.ks, N, this.kernel, this.tracer, this.model_kind);
             deconvolved = M0*this.model.deconvolved(this.ks, N, this.kernel, this.tracer, this.model_kind);
-            times = 0:N-1;
+            timesMid = 0.5:N-0.5;
             
             if isempty(this.zoom)
                 this.zoom = max(deconvolved)/max(this.kernel)/2;
@@ -147,14 +153,14 @@ classdef RadialArterySimulAnneal < mlio.AbstractIO
                 leg_kern = 'kernel';
             end
             if ipr.showKernel
-                plot(asrow(M.times), asrow(M.activityDensity), 'o', ...
-                    times, samp, ':', ...
-                    times, deconvolved, '-', ...
-                    times, this.zoom*this.kernel, '--', 'LineWidth', 2)
+                plot(asrow(M.timesMid), asrow(M.activityDensity), 'o', ...
+                    timesMid, samp, ':', ...
+                    timesMid, deconvolved, '-', ...
+                    timesMid, this.zoom*this.kernel, '--', 'LineWidth', 2)
                 legend({'measured', 'estimated', 'deconvolved', leg_kern})
             else
-                plot(asrow(M.times), asrow(M.activityDensity), 'o', ...
-                    times, samp, ':', 'LineWidth', 2)
+                plot(asrow(M.timesMid), asrow(M.activityDensity), 'o', ...
+                    timesMid, samp, ':', 'LineWidth', 2)
                 legend({'measured', 'estimated'}, 'FontSize', 10)
             end
             if ~isempty(ipr.xlim); xlim(ipr.xlim); end
@@ -230,19 +236,8 @@ classdef RadialArterySimulAnneal < mlio.AbstractIO
                     join(struct2str(this.map(keys{ky}), orientation='horz')))]; %#ok<AGROW>
             end
         end
-        function writetable(this, fqfn)
-            M0 = max(this.Measurement.activityDensity);
-            N = floor(this.Measurement.times(end)) + 1;
-            activityDensityDC = ascol(M0*this.model.sampled(this.ks, N, this.kernel, this.tracer, this.model_kind));
-            times = (0:length(activityDensityDC)-1)'; % sec
-            activityDensityDC = activityDensityDC .* 2.^(times/6582);
-            activityDensityDC = activityDensityDC/37000;
-            times = times/60;
-            T = table(times, activityDensityDC);
-            writetable(T, fqfn);
-        end
 
-        function this = RadialArterySimulAnneal(opts)
+        function this = ArterySimulAnneal(opts)
             %%  Args:
             %   context
             %   opts.sigma0 double {mustBeScalarOrEmpty} = []

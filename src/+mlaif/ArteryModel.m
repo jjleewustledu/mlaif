@@ -1,4 +1,4 @@
-classdef RadialArteryModel
+classdef ArteryModel
     %% line1
     %  line2
     %  
@@ -19,7 +19,7 @@ classdef RadialArteryModel
     end
 
 	methods		  
- 		function this = RadialArteryModel(opts)
+ 		function this = ArteryModel(opts)
             %%  Args:
             %   opts.tracer {mustBeTextScalar} = 'FDG'
             %   opts.model_kind = '3bolus'
@@ -37,7 +37,7 @@ classdef RadialArteryModel
                 opts.times_sampled = []
             end
             if isempty(opts.map)
-                opts.map = mlaif.RadialArteryModel.preferredMap();
+                opts.map = mlaif.ArteryModel.preferredMap();
             end
 
             this.tracer = upper(opts.tracer);
@@ -53,22 +53,22 @@ classdef RadialArteryModel
 
     methods (Static)
         function rho = decay_corrected(rho, tracer, indices)
-            import mlaif.RadialArteryModel.halflife
-            times = 0:(length(rho)-1);
-            rho = rho .* 2.^(times/halflife(tracer));
+            import mlaif.ArteryModel.halflife
+            timesMid = 0.5:(length(rho)-0.5);
+            rho = rho .* 2.^(timesMid/halflife(tracer));
             rho = rho(indices);
         end
         function rho = decay_corrected_from_table(T, tracer)
-            import mlaif.RadialArteryModel.halflife
-            times = T.times;
+            import mlaif.ArteryModel.halflife
+            timesMid = T.timesMid;
             rho = T.activityDensity;
-            rho = rho .* 2.^(times/halflife(tracer));
+            rho = rho .* 2.^(timesMid/halflife(tracer));
             rho = asrow(rho);
         end
         function rho = deconvolved(ks, N, kernel, tracer, model_kind)
-            soln = mlaif.RadialArteryModel.solution(ks, N, tracer, model_kind);
+            soln = mlaif.ArteryModel.solution(ks, N, tracer, model_kind);
             baseline_frac = ks(9);
-            if kernel == 1
+            if ~isvector(kernel)
                 rho = (1 - baseline_frac)*soln;
                 return
             end
@@ -89,18 +89,18 @@ classdef RadialArteryModel
                     tau = 122.2416;
                 otherwise
                     error('mlan:ValueError', ...
-                        'RadialArteryModel.halflife.tracer = %s', tracer)
+                        'ArteryModel.halflife.tracer = %s', tracer)
             end            
         end
         function loss = loss_function(ks, kernel, tracer, model_kind, Measurement)
-            import mlaif.RadialArteryModel.sampled
-            import mlaif.RadialArteryModel.decay_corrected
-            import mlaif.RadialArteryModel.decay_corrected_from_table
+            import mlaif.ArteryModel.sampled
+            import mlaif.ArteryModel.decay_corrected
+            import mlaif.ArteryModel.decay_corrected_from_table
 
-            times_ = asrow(Measurement.times); % discrete
+            times_ = asrow(Measurement.timesMid - Measurement.timesMid(1)); % discrete
             indices_ = floor(times_) + 1; % discrete
-            N = floor(times_(end)) + 1; % interpolated
             measurement_ = asrow(Measurement.activityDensity); % discrete
+            N = length(measurement_);
 
             estimation = sampled(ks, N, kernel, tracer, model_kind); % \in [0 1]
             estimation_ = estimation(indices_);
@@ -115,6 +115,7 @@ classdef RadialArteryModel
             eoverm_dc = estimation_dc__(positive_)./measurement_dc_(positive_);
             
             loss = mean(abs(1 - 0.5*eoverm_ - 0.5*eoverm_dc));
+            loss = double(loss);
         end
         function m = preferredMap()
             m = containers.Map;
@@ -134,35 +135,39 @@ classdef RadialArteryModel
             baseline_frac = ks(9);
             scale_frac = 1 - baseline_frac;
             
-            qs = mlaif.RadialArteryModel.solution(ks, N, tracer, model_kind);
-            if kernel ~= 1
+            if isvector(kernel)
+                qs = mlaif.ArteryModel.solution(ks, N, tracer, model_kind);
                 qs = conv(qs, kernel);
+                qs = qs(1:N);
             end
-            qs = qs(1:N);
+            if contains(model_kind, 'window')
+                re = regexp(model_kind, "\S+window(?<W>\d+)\S*", "names");
+                W = str2double(re.W);
+                qs = mlaif.ArteryModel.solution(ks, N+W-1, tracer, model_kind);
+                qs = mlaif.ArteryModel.move_window(qs, W=W);
+            end            
             qs = qs/max(qs); % \in [0 1] 
             qs = scale_frac*qs + baseline_frac; % \in [0 1]   
         end
         function qs = solution(ks, N, tracer, model_kind)
             %% @return the idealized true AIF without baseline, scaled to unity.
             
-            import mlaif.RadialArteryModel
-            switch model_kind
-                case '1bolus'
-                    qs = RadialArteryModel.solution_1bolus(ks, N, tracer, ks(3));
-                case '2bolus'
-                    qs = RadialArteryModel.solution_2bolus(ks, N, tracer, ks(3));
-                case '3bolus'
-                    qs = RadialArteryModel.solution_3bolus(ks, N, tracer);
-                otherwise
-                    error('mlaif:ValueError', ...
-                        'RadialArteryModel.solution.model_kind = %s', model_kind)
+            import mlaif.ArteryModel
+            if contains(model_kind, '1bolus')
+                qs = ArteryModel.solution_1bolus(ks, N, tracer, ks(3));
+            end
+            if contains(model_kind, '2bolus')
+                qs = ArteryModel.solution_2bolus(ks, N, tracer, ks(3));
+            end
+            if contains(model_kind, '3bolus')
+                qs = ArteryModel.solution_3bolus(ks, N, tracer);
             end
         end
         function qs = solution_1bolus(ks, N, tracer, p)
             %% stretched gamma distribution
 
-            import mlaif.RadialArteryModel.slide
-            import mlaif.RadialArteryModel.halflife
+            import mlaif.ArteryModel.slide
+            import mlaif.ArteryModel.halflife
             t = 0:N-1;
             t0 = ks(5);
             a = ks(1);
@@ -183,8 +188,8 @@ classdef RadialArteryModel
         function qs = solution_2bolus(ks, N, tracer, p)
             %% stretched gamma distribution + rising steadystate
 
-            import mlaif.RadialArteryModel.slide
-            import mlaif.RadialArteryModel.halflife
+            import mlaif.ArteryModel.slide
+            import mlaif.ArteryModel.halflife
             t = 0:N-1;
             t0 = ks(5);
             a = ks(1);
@@ -212,9 +217,9 @@ classdef RadialArteryModel
             %% stretched gamma distribution + rising steadystate + auxiliary stretched gamma distribution; 
             %  forcing p2 = p - dp2 < p, to be more dispersive
 
-            import mlaif.RadialArteryModel.solution_1bolus
-            import mlaif.RadialArteryModel.solution_2bolus
-            import mlaif.RadialArteryModel.slide
+            import mlaif.ArteryModel.solution_1bolus
+            import mlaif.ArteryModel.solution_2bolus
+            import mlaif.ArteryModel.slide
             recirc_frac = ks(7);
             recirc_delay = ks(8);
             
@@ -234,21 +239,37 @@ classdef RadialArteryModel
                 return
             end
             T = false; 
-        end    
+        end
+        function qs = move_window(qs, opts)
+            arguments
+                qs double
+                opts.W double
+            end
+            
+            %persistent L
+            %if isempty(L)
+                P = length(qs)-opts.W+1;
+                N = P/opts.W;
+                P1 = P + opts.W - 1;
+                L = tril(ones(P,P1), opts.W-1) - tril(ones(P,P1), -1);
+                L = L/opts.W;
+            %end
+            qs = asrow(L*ascol(qs));
+        end
         function conc = slide(conc, t, Dt)
             %% SLIDE slides discretized function conc(t) to conc(t - Dt);
-            %  Dt > 0 will slide conc(t) towards later times t.
-            %  Dt < 0 will slide conc(t) towards earlier times t.
+            %  Dt > 0 will slide conc(t) towards later timesMid t.
+            %  Dt < 0 will slide conc(t) towards earlier timesMid t.
             %  It works for inhomogeneous t according to the ability of interp1 to interpolate.
             %  It may not preserve information according to the Nyquist-Shannon theorem.  
             
-            import mlaif.RadialArteryModel;
-            [conc,trans] = mlaif.RadialArteryModel.ensureRow(conc);
-            t            = mlaif.RadialArteryModel.ensureRow(t);
+            import mlaif.ArteryModel;
+            [conc,trans] = asrow(conc);
+            t            = asrow(t);
             
             tspan = t(end) - t(1);
             tinc  = t(2) - t(1);
-            t_    = [(t - tspan - tinc) t];   % prepend times
+            t_    = [(t - tspan - tinc) t];   % prepend timesMid
             conc_ = [zeros(size(conc)) conc]; % prepend zeros
             conc_(isnan(conc_)) = 0;
             conc  = interp1(t_, conc_, t - Dt); % interpolate onto t shifted by Dt; Dt > 0 shifts to right
@@ -263,20 +284,18 @@ classdef RadialArteryModel
     
     methods (Access = protected)     
         function this = adjustMapForModelKind(this)
-            switch lower(this.model_kind)
-                case '1bolus'        
-                    this.map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
+            if contains(this.model_kind, '1bolus', IgnoreCase=true)     
+                this.map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
 
-                    this.map('k6') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
-                    this.map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
-                    this.map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay in sec
-                case '2bolus'
-                    this.map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
+                this.map('k6') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
+                this.map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
+                this.map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay in sec
+            end
+            if contains(this.model_kind, '2bolus', IgnoreCase=true)
+                this.map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
 
-                    this.map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
-                    this.map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay in sec
-                case '3bolus'
-                otherwise
+                this.map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
+                this.map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay in sec
             end
             if ~isempty(this.t0_forced)
                 this.map('k5') = struct('min', this.t0_forced, 'max', this.t0_forced, 'init', this.t0_forced, 'sigma', 0.05); % t0 in sec
@@ -311,7 +330,6 @@ classdef RadialArteryModel
                 otherwise
                     % noninformative
             end
-
             if ~isempty(this.t0_forced)
                 this.map('k5') = struct('min', this.t0_forced, 'max', this.t0_forced, 'init', this.t0_forced, 'sigma', 0.05); % t0 in sec
             end

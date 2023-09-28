@@ -1,5 +1,5 @@
-classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogeneous & matlab.mixin.Copyable
-    %% RadialArtery provides a strategy design pattern for inferring cerebral AIFs
+classdef Artery < handle & mlsystem.IHandle
+    %% ARTERY provides a strategy design pattern for inferring cerebral AIFs
     %  from measurements sampling the radial artery and an arbitrary model kernel for delay and dispersion.
     %  
     %  Created 28-Apr-2023 14:34:29 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/src/+mlaif.
@@ -32,25 +32,25 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
     end
 
     methods
-        function this = RadialArtery(Measurement, units, opts)
-            %% RADIALARTERY 
-            %  @param Measurement is a table:  [times, ]activityDensity in [sec, ]Bq/mL.
+        function this = Artery(Measurement, units, opts)
+            %% ARTERY 
+            %  @param Measurement is a table:  [timesMid, ]activityDensity in [sec, ]Bq/mL.
             %  @param solver is in {'simulanneal'}.
 
-            %  for mlaif.RadialArteryModel: 
+            %  for mlaif.ArteryModel: 
             %  @param tracer, passed to model.
-            %  @param model_kind is char, e.g. '1bolus', '2bolus', '3bolus', passed to model.
-            %  @param map is a containers.Map.  Default := RadialArteryModel.preferredMap.
+            %  @param model_kind is char, e.g. '1bolus', '2bolus', '3bolus', '3bolus-window10', etc., passed to model.
+            %  @param map is a containers.Map.  Default := ArteryModel.preferredMap.
  			%  @param kernel is numeric, default := 1.
             %  @param t0_forced is scalar, default empty, passed to model.
             %
-            %  for mlaif.RadialArterySimulAnneal:
-            %  @param context is mlaif.RadialArtery.
+            %  for mlaif.ArterySimulAnneal:
+            %  @param context is mlaif.Artery.
             %  @param fileprefix.
 
             arguments
                 Measurement table
-                units struct
+                units struct = struct("timesMid", "sec", "activityDensity", "Bq/mL")
                 opts.solver string {mustBeTextScalar} = "simulanneal"
                 opts.tracer {mustBeTextScalar} = 'FDG'
                 opts.model_kind {mustBeTextScalar} = '3bolus'
@@ -59,22 +59,22 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
             
             this.Measurement = Measurement;
             this.units = units;
- 			this.model = mlaif.RadialArteryModel( ...
+ 			this.model = mlaif.ArteryModel( ...
                 tracer=opts.tracer, model_kind=opts.model_kind, kernel=opts.kernel);
             this.standardize_ctor_args();
                         
             switch opts.solver
                 case "simulanneal"
-                    this.strategy_ = mlaif.RadialArterySimulAnneal(context=this);
+                    this.strategy_ = mlaif.ArterySimulAnneal(context=this);
                 otherwise
                     error("mlaif:NotImplementedError", ...
-                        "RadialArtery.ipr.solver->%s", ipr.solver)
+                        "Artery.ipr.solver->%s", ipr.solver)
             end
         end
 
         function rho = deconvolved(this)
             M0 = max(this.Measurement.activityDensity);
-            N = floor(this.Measurement.times(end)) + 1;
+            N = size(this.Measurement, 1);
             ks = this.strategy_.ks;
             mdl = this.model;
             rho = M0*this.model.deconvolved(ks, N, mdl.kernel, mdl.tracer, mdl.model_kind);
@@ -91,10 +91,7 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
         function this = solve(this, varargin)
             %% @param required loss_function is function_handle.
             
-            this.strategy_ = solve(this.strategy_, @mlaif.RadialArteryModel.loss_function);
-        end
-        function writetable(this, fqfn)
-            writetable(this.strategy_, fqfn)
+            this.strategy_ = solve(this.strategy_, @mlaif.ArteryModel.loss_function);
         end
     end
     
@@ -114,22 +111,22 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
         function standardize_ctor_args(this)
             if 1 == length(this.Measurement.Properties.VariableNames)
                 % assume activityDensity is sampled at 1 Hz
-                times = 0:size(this.Measurement,1)-1;
-                this.Measurement = addvars(this.Measurement, times, 1);
+                timesMid = 0.5:size(this.Measurement,1)-0.5;
+                this.Measurement = addvars(this.Measurement, timesMid, 1);
             end
-            switch lower(char(this.units.times)) % convert times to seconds
+            switch lower(char(this.units.timesMid)) % convert timesMid to seconds
                 case {'s', 'sec', 'second', 'seconds'}
                 case {'m', 'min', 'minute', 'minutes'}
-                    this.Measurement.times = round(60*this.Measurement.times);
+                    this.Measurement.timesMid = round(60*this.Measurement.timesMid);
                 case {'h', 'hr', 'hour', 'hours'}
-                    this.Measurement.times = round(3600*this.Measurement.times);
+                    this.Measurement.timesMid = round(3600*this.Measurement.timesMid);
                 otherwise
                     error("mlaif:ValueError", ...
-                        "RadialArtery.standardize_ctor_args.this.units.times->%s", this.units.times)
+                        "Artery.standardize_ctor_args.this.units.timesMid->%s", this.units.timesMid)
             end
             if ~isempty(this.varNameDecayCorrected)
                 % convert external decay corrections to decay uncorreted
-                factor = 2.^(-this.Measurement.times/this.model.halflife);
+                factor = 2.^(-this.Measurement.timesMid/this.model.halflife);
                 this.Measurement.activityDensity = this.Measurement.(this.varNameDecayCorrected).*factor;
                 this.units.activityDensity = this.units.(this.varNameDecayCorrected);
             end
@@ -143,7 +140,7 @@ classdef RadialArtery < handle & mlio.AbstractHandleIO & matlab.mixin.Heterogene
                     this.Measurement.activityDensity = 37e3*this.Measurement.activityDensity;
                 otherwise
                     error("mlaif:ValueError", ...
-                        "RadialArtery.standardize_ctor_args.this.units.activityDensity->%s", this.units.activityDensity)
+                        "Artery.standardize_ctor_args.this.units.activityDensity->%s", this.units.activityDensity)
             end
         end
     end

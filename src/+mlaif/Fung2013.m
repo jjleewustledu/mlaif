@@ -141,7 +141,7 @@ classdef Fung2013 < handle & mlsystem.IHandle
     end
 
     methods
-        function idif_ic = call(this, varargin)
+        function idif_ic = build_all(this, varargin)
             %  Args:
             %      coord1 (vector):  updates values from ctor.
             %      coord2 (vector):  updates values from ctor.
@@ -302,7 +302,7 @@ classdef Fung2013 < handle & mlsystem.IHandle
                                 'coord1', ipr.coords.(t_).(h_).coord1, ...
                                 'coord2', ipr.coords.(t_).(h_).coord2, ...
                                 'use_cache', true, varargin{:});
-                            call(f, 'pet_dyn', globbed{ig});
+                            build_all(f, 'pet_dyn', globbed{ig});
                         catch ME
                             handwarning(ME);
                         end

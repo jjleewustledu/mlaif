@@ -363,13 +363,13 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
                 'needs_reregistration', false, ...
                 'verbose', 2);
             ic = mlfourd.ImagingContext2(fullfile(this.simplemed.scanPath, 'sub-108293_ses-20210421155709_trc-fdg_proc-dyn_pet.nii.gz'));
-            fung2013.call('pet_dyn', ic, 'use_cache', true);
+            fung2013.build_all('pet_dyn', ic, 'use_cache', true);
         end
         function test_call_tof(this)
             fung2013 = mlaif.Fung2013.createForTof('bids', this.bids, ...
                 'coord1', [228 392 37], ...
                 'coord2', [358 473 90]); % try y = 515 | 473
-            fung2013.call('pet_dyn', this.ho, 'use_cache', true);
+            fung2013.build_all('pet_dyn', this.ho, 'use_cache', true);
         end
         function test_createFromCoords(this)
             coords = struct( ...
@@ -570,6 +570,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
 
             try
                 deriv_fdg = this.bids.prepare_derivatives(this.fdg_avgt);
+                deriv_fdg = this.bids.prepare_orient_std(deriv_fdg);
             catch
             end
             pet = aa.pet_static_on_anatomy(deriv_fdg);
@@ -587,6 +588,7 @@ classdef Test_AbstractFung2013 < matlab.unittest.TestCase
 
             try
                 deriv_fdg = this.bids.prepare_derivatives(this.fdg_avgt);
+                deriv_fdg = this.bids.prepare_orient_std(deriv_fdg);
             catch
             end
             pet = aa.pet_static_on_anatomy(deriv_fdg);

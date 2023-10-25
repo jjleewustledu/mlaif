@@ -15,7 +15,7 @@ classdef (Abstract) AbstractFung2013 < handle & mlsystem.IHandle
         buildCenterlines(this)
         buildCorners(this)
         buildSegmentation(this)
-        call(this)
+        build_all(this)
     end
 
     methods (Static)

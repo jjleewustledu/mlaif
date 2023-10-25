@@ -8,10 +8,10 @@ classdef MipIdif < handle & mlsystem.IHandle
         centerline_on_pet
         centerline_source
         halflife
-        pet_avgt % w/o decay-correction, weighted by taus
+        pet_avgt % w/ decay-correction, weighted by taus
         pet_avgt_on_tof
-        pet_dyn
-        pet_mipt % w/o decay-correction
+        pet_dyn % read from filesystem to minimize copies of objects in memory
+        pet_mipt % w/ decay-correction
         pet_mipt_on_tof
         product
         t1w
@@ -51,6 +51,13 @@ classdef MipIdif < handle & mlsystem.IHandle
                 return
             end
 
+            fqfn = strrep(this.pet_dyn.fqfp, "createNiftiMovingAvgFrames", "createNiftiStatic");
+            if isfile(fqfn)
+                this.pet_avgt_ = mlfourd.ImagingContext2(fqfn);
+                g = this.pet_avgt_;
+                return
+            end
+
             fqfn = this.pet_dyn.fqfp+"_avgt.nii.gz";
             if isfile(fqfn)
                 this.pet_avgt_ = mlfourd.ImagingContext2(fqfn);
@@ -80,12 +87,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             g = this.pet_avgt_on_tof_;
         end
         function g = get.pet_dyn(this)
-            assert(~isempty(this.pet_dyn_))
-            this.pet_dyn_.relocateToDerivativesFolder();
-            if ~isfile(this.pet_dyn_)
-                save(this.pet_dyn_);
-            end
-            g = this.pet_dyn_;
+            g = mlfourd.ImagingContext2(this.pet_dyn_fqfn_);
         end
         function g = get.pet_mipt(this)
             if ~isempty(this.pet_mipt_)
@@ -184,7 +186,169 @@ classdef MipIdif < handle & mlsystem.IHandle
         end
     end
 
-    methods   
+    methods
+        function cl = back_project(this)
+            %% back-project MIPs            
+            
+            pwd1 = pushd(this.pet_dyn.filepath);
+
+            % read_avw <- $FSLDIR/etc/matlab
+            cxL_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_xl.nii.gz"));
+            cxR_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_xr.nii.gz"));
+            cyL_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_yl.nii.gz"));
+            cyR_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_yr.nii.gz"));
+            czL_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_zl.nii.gz"));
+            czR_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_zr.nii.gz"));
+            
+            size_tof = size(this.tof);
+            img1 = zeros(size_tof);
+            img2 = zeros(size_tof);
+            img3 = zeros(size_tof);
+            img4 = zeros(size_tof);
+            img5 = zeros(size_tof);
+            img6 = zeros(size_tof);
+            
+            for ix = 1:size_tof(1)
+                img1(ix,:,:) = cxL_img; end
+            for iy = 1:size_tof(2)
+                img2(:,iy,:) = cyL_img; end
+            for iz = 1:size_tof(3)
+                img3(:,:,iz) = czL_img; end
+            for ix = 1:size_tof(1)
+                img4(ix,:,:) = cxR_img; end
+            for iy = 1:size_tof(2)
+                img5(:,iy,:) = cyR_img; end
+            for iz = 1:size_tof(3)
+                img6(:,:,iz) = czR_img; end
+            
+            img1 = imdilate(img1, strel("sphere", 1));
+            img2 = imdilate(img2, strel("sphere", 1));
+            img3 = imdilate(img3, strel("sphere", 1));
+            img4 = imdilate(img4, strel("sphere", 1));
+            img5 = imdilate(img5, strel("sphere", 1));
+            img6 = imdilate(img6, strel("sphere", 1));
+            
+            imgL = img1 & img2 & img3;
+            imgR = img4 & img5 & img6;
+            
+            %tof1 = this.tof.thresh(150).binarized();
+            cl = copy(this.tof); 
+            cl = cl.nifti;
+            cl.img = imgL + imgR;
+            cl.fileprefix = 'centerline_on_tof';
+            cl = mlfourd.ImagingContext2(cl);
+            cl.save()
+            %cl.pcshow()  
+
+            % transform centerline from tof native to pet native
+            this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
+                fullfile(this.pet_dyn.filepath, "centerline_on_pet.nii.gz"));
+            cl_on_pet_flirt = copy(this.tof_on_pet_flirt);
+            cl_on_pet_flirt.in = cl;
+            cl_on_pet_flirt.out = this.centerline_on_pet_;
+            cl_on_pet_flirt.interp = 'trilinear';
+            cl_on_pet_flirt.applyXfm;
+            assert(isfile(this.centerline_on_pet_.fqfn))   
+            this.centerline_on_pet_.selectImagingTool();
+            thr = dipmax(this.centerline_on_pet_)/10;
+            this.centerline_on_pet_ = this.centerline_on_pet_.thresh(thr);
+            this.centerline_on_pet_ = this.centerline_on_pet_.binarized();
+            this.centerline_on_pet_.fileprefix = "centerline_on_pet";
+            this.centerline_on_pet_.save();
+
+            popd(pwd1);
+        end
+        function idif_ic = build_aif(this, petobj, tofobj, opts)
+            arguments
+                this mlaif.MipIdif
+                petobj
+                tofobj
+                opts.cl = this.centerline_on_pet
+                opts.mipt_thr double = 180000
+                opts.frac_select double = 0.05
+            end
+
+            % e.g., !ls *tof*T1w*.nii.gz -> 'sub-108293_ses-20210218092914_tof_fl3d_tra_p2_multi-slab_orient-std_on_T1w.nii.gz'
+            tof__ = mlfourd.ImagingContext2(tofobj);
+
+            % e.g., !ls *trc-oc*.nii.gz -> 'sub-108293_ses-20210421144815_trc-oc_proc-dyn_pet_on_T1w.nii.gz'
+            tr = mlfourd.ImagingContext2(petobj);
+            tr_single = single(tr);
+            sz = size(tr_single);
+            [tr_mipt,tr_indices] = max(tr, [], 4);
+            %tr_mipt.view(opts.cl, tof__)
+
+            % parse tracobj for tags
+            re = regexp(tr.fileprefix, "(?<sub>sub-\S+)_(?<ses>ses-\d+)_trc-(?<trc>\S+)_proc-(?<proc>\S+)", "names");
+            assert(~isempty(re))
+            if strcmp(re.trc, "co") || strcmp(re.trc, "oc")
+                opts.mipt_thr = min(50000, opts.mipt_thr);
+            end
+
+            % pcshow
+            hold("on")
+            toshow = tr_mipt.thresh(opts.mipt_thr); toshow.pcshow()
+            opts.cl.pcshow()
+            hold("off")
+            saveFigure2(gcf, fullfile(tr.filepath, ...
+                sprintf("pcshow_%s_%s_trc-%s_proc-tof-mips.fig", re.sub, re.ses, re.trc)))
+
+            % select 0.05*numel of brightest and earliest-arriving voxels from centerline        
+            centerline = logical(opts.cl);
+            tr_single__ = zeros(dipsum(centerline), sz(4));
+            for t = 1:sz(4)
+                vol_ = tr_single(:,:,:,t);
+                tr_single__(:,t) = vol_(centerline);
+            end
+            brightest = single(tr_mipt);
+            brightest = brightest(centerline);
+            earliest = single(tr_indices);
+            earliest = earliest(centerline);
+
+            len = length(earliest);
+            T = table(ascol(1:len), ascol(brightest), ascol(earliest), variableNames=["indices", "brightest", "earliest"]);
+            T = sortrows(T, [2, 3], {'descend', 'ascend'});
+            T = T(ascol(1:round(opts.frac_select*len)), :);
+            tr_single__ = tr_single__(T.indices,:);
+            tr_single__ = mean(tr_single__, 1);
+
+            % aif from volume-average of brightest 0.05 from centerline
+            idif_ic = this.save_idif(mlfourd.ImagingContext2(tr_single__));
+
+            % plot
+            h = figure;
+            timesMid = idif_ic.json_metadata.timesMid;
+            plot(asrow(timesMid), asrow(idif_ic.imagingFormat.img), ':o')
+            fontsize(scale=1.3)
+            xlabel("times (s)")
+            ylabel("IDIF activity density (Bq/mL)")
+            title(sprintf("IDIF by MIPs, %s_%s_trc-%s", re.sub, re.ses, re.trc), Interpreter="none")
+            savefig(h, strcat(idif_ic.fileprefix, ".fig"))
+        end
+        function idif_ic = build_all(this, opts)
+            arguments
+                this mlaif.MipIdif
+                opts.steps logical = true(1, 4)
+            end
+
+            if opts.steps(1)
+                this.build_pet_objects();
+            end
+            if opts.steps(2)
+                this.build_tof_mips();
+            end
+            if opts.steps(3)
+                this.back_project();
+            end
+            if opts.steps(4)
+                idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet);
+            else
+                idif_ic = [];
+            end
+
+            %this.arterial_centerline_ = [];
+            %this.arterial_input_function_ = [];
+        end        
         function build_pet_objects(this)
             %% Build PET mips for use as guides when calling build_tof_mips.
             %  Also build transformations for registering centerlines to native PET.
@@ -252,7 +416,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
             assert(isfile(this.pet_mipt_on_tof_.fqfn))
 
-            %% Transform tof to PET mipt.            
+            %% Transform tof to PET mipt.
 
             fn = this.tof.fileprefix+"_on_pet_avgt.nii.gz";
             fqfn = fullfile(this.pet_dyn.filepath, fn);
@@ -275,6 +439,8 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             %% draw in fsleyes 2-3 voxel widths for barycentric continuity
 
+            pwd0 = pushd(this.pet_dyn.filepath);
+
             fprintf("Please draw arterial centerlines as overlaid images on the tof\n" + ...
                 "Save files: centerline_zl and centerline_zr.\n\n");
             tof_mipz = max(this.tof, [], 3); 
@@ -284,80 +450,54 @@ classdef MipIdif < handle & mlsystem.IHandle
             tof_mipy = max(this.tof, [], 2); 
             tof_mipy.view(pet_mipty) % pet_mipty.view(tof_mipy)
             fprintf("Please draw arterial centerlines as overlaid images on the tof\n" + ...
-                "Save files: centerline_xa and centerline_xp.\n\n");
+                "Save files: centerline_xl and centerline_xr.\n\n");
             tof_mipx = max(this.tof, [], 1); 
             tof_mipx.view(pet_miptx) % pet_miptx.view(tof_mipx)
+
+            popd(pwd0);
         end
-        function cl = back_project(this)
-            %% back-project MIPs            
-            
-            pwd1 = pushd(this.pet_dyn.filepath);
+        function out_ic = flirt_centerline(this, target, target_trc)
+            arguments
+                this mlkinetics.MipIdif
+                target {mustBeNonempty}
+                target_trc {mustBeTextScalar} = "unknown"
+            end
+            target = mlfourd.ImagingContext2(target);
 
-            % read_avw <- /usr/local/fsl/etc/matlab
-            cxL_img = read_avw('centerline_xa.nii.gz');
-            cxR_img = read_avw('centerline_xp.nii.gz');
-            cyL_img = read_avw('centerline_yl.nii.gz');
-            cyR_img = read_avw('centerline_yr.nii.gz');
-            czL_img = read_avw('centerline_zl.nii.gz');
-            czR_img = read_avw('centerline_zr.nii.gz');
-            
-            size_tof = size(this.tof);
-            img1 = zeros(size_tof);
-            img2 = zeros(size_tof);
-            img3 = zeros(size_tof);
-            img4 = zeros(size_tof);
-            img5 = zeros(size_tof);
-            img6 = zeros(size_tof);
-            
-            for ix = 1:size_tof(1)
-                img1(ix,:,:) = cxL_img; end
-            for iy = 1:size_tof(2)
-                img2(:,iy,:) = cyL_img; end
-            for iz = 1:size_tof(3)
-                img3(:,:,iz) = czL_img; end
-            for ix = 1:size_tof(1)
-                img4(ix,:,:) = cxR_img; end
-            for iy = 1:size_tof(2)
-                img5(:,iy,:) = cyR_img; end
-            for iz = 1:size_tof(3)
-                img6(:,:,iz) = czR_img; end
-            
-            img1 = imdilate(img1, strel("sphere", 1));
-            img2 = imdilate(img2, strel("sphere", 1));
-            img3 = imdilate(img3, strel("sphere", 1));
-            img4 = imdilate(img4, strel("sphere", 1));
-            img5 = imdilate(img5, strel("sphere", 1));
-            img6 = imdilate(img6, strel("sphere", 1));
-            
-            imgL = img1 & img2 & img3;
-            imgR = img4 & img5 & img6;
-            
-            %tof1 = this.tof.thresh(150).binarized();
-            cl = copy(this.tof); 
-            cl = cl.nifti;
-            cl.img = imgL + imgR;
-            cl.fileprefix = 'centerline_on_tof';
-            cl = mlfourd.ImagingContext2(cl);
-            cl.save()
-            cl.pcshow()  
+            % flirt
+            cl = this.centerline_on_pet;
+            source = this.centerline_source;
+            source_on_target = mlfourd.ImagingContext2( ...
+                source.fqfp+"_on_"+target_trc+".nii.gz");
+            cl_flirt = mlfsl.Flirt( ...
+                'in', source, ...
+                'ref', target, ...
+                'out', source_on_target, ...
+                'omat', this.mat(source_on_target), ...
+                'bins', 256, ...
+                'cost', 'mutualinfo', ...
+                'dof', 6, ...
+                'interp', 'spline', ...
+                'noclobber', false);
+            if ~isfile(source_on_trc.fqfn)
+                % do expensive coreg.
+                cl_flirt.flirt();
+            end
+            assert(isfile(source_on_trc.fqfn))
 
-            % transform centerline from tof native to pet native
-            this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
-                fullfile(this.pet_dyn.filepath, "centerline_on_pet.nii.gz"));
-            cl_on_pet_flirt = copy(this.tof_on_pet_flirt);
-            cl_on_pet_flirt.in = cl;
-            cl_on_pet_flirt.out = this.centerline_on_pet_;
-            cl_on_pet_flirt.interp = 'trilinear';
-            cl_on_pet_flirt.applyXfm;
-            assert(isfile(this.centerline_on_pet_.fqfn))   
-            this.centerline_on_pet_.selectImagingTool();
-            thr = dipmax(this.centerline_on_pet_)/10;
-            this.centerline_on_pet_ = this.centerline_on_pet_.thresh(thr);
-            this.centerline_on_pet_ = this.centerline_on_pet_.binarized();
-            this.centerline_on_pet_.fileprefix = "centerline_on_pet";
-            this.centerline_on_pet_.save();
-
-            popd(pwd1);
+            % applyxfm
+            out_ic = mlfourd.ImagingContext2( ...
+                fullfile(target.filepath, "centerline_on_"+target_trc+"nii.gz"));
+            cl_flirt.in = cl;
+            cl_flirt.out = out_ic;
+            cl_flirt.interp = "nearestneighbour";
+            cl_flirt.applyXfm();
+        end
+        function [ic] = pet_static_on_anatomy(this)
+            ic = this.pet_avgt_on_tof;
+        end
+        function pet_dyn_on_anatomy(~)
+            error("mlaif:NotImplementedError", "MipIdif");
         end
         function [aife,aifl] = splice_early_to_late(this, earlyobj, lateobj, len_late, trc, ident)
             arguments
@@ -413,122 +553,6 @@ classdef MipIdif < handle & mlsystem.IHandle
             ylabel("AIF activity (Bq/mL)")
             title(sprintf("AIF by TOF MIPs, %s", ident), Interpreter="none")            
         end
-
-        function idif_ic = build_aif(this, petobj, tofobj, opts)
-            arguments
-                this mlaif.MipIdif
-                petobj
-                tofobj
-                opts.cl = this.centerline_on_pet
-                opts.mipt_thr double = 180000
-            end
-
-            % e.g., !ls *tof*T1w*.nii.gz -> 'sub-108293_ses-20210218092914_tof_fl3d_tra_p2_multi-slab_orient-std_on_T1w.nii.gz'
-            tof__ = mlfourd.ImagingContext2(tofobj);
-
-            % e.g., !ls *trc-oc*.nii.gz -> 'sub-108293_ses-20210421144815_trc-oc_proc-dyn_pet_on_T1w.nii.gz'
-            tr = mlfourd.ImagingContext2(petobj);
-            tr_mipt = max(tr, [], 4);
-            tr_mipt.view(opts.cl, tof__)
-
-            % parse tracobj for tags
-            re = regexp(tr.fileprefix, "(?<sub>sub-\S+)_(?<ses>ses-\d+)_trc-(?<trc>\S+)_proc-(?<proc>\S+)", "names");
-            assert(~isempty(re))
-            if strcmp(re.trc, "co") || strcmp(re.trc, "oc")
-                opts.mipt_thr = min(50000, opts.mipt_thr);
-            end
-
-            % pcshow
-            hold("on")
-            toshow = tr_mipt.thresh(opts.mipt_thr); toshow.pcshow()
-            opts.cl.pcshow()
-            hold("off")
-            saveFigure2(gcf, fullfile(tr.filepath, ...
-                sprintf("pcshow_%s_%s_trc-%s_proc-tof-mips.fig", re.sub, re.ses, re.trc)))
-
-            % aif from volume-averaged centerline
-            idif_ic = tr.volumeAveraged(opts.cl);
-            idif_ic = this.save_idif(idif_ic);
-
-            % plot
-            h = figure;
-            timesMid = idif_ic.json_metadata.timesMid;
-            plot(asrow(timesMid), asrow(idif_ic.imagingFormat.img), ':o')
-            fontsize(scale=1.3)
-            xlabel("times (s)")
-            ylabel("IDIF activity density (Bq/mL)")
-            title(sprintf("IDIF by MIPs, %s_%s_trc-%s", re.sub, re.ses, re.trc), Interpreter="none")
-            savefig(h, strcat(idif_ic.fileprefix, ".fig"))
-        end
-        function idif_ic = call(this, opts)
-            arguments
-                this mlaif.MipIdif
-                opts.pet_dyn mlfourd.ImagingContext2
-                opts.steps logical = true(1, 4)
-            end
-            this.pet_dyn_ = opts.pet_dyn;
-
-            if opts.steps(1)
-                this.build_pet_objects();
-            end
-            if opts.steps(2)
-                this.build_tof_mips();
-            end
-            if opts.steps(3)
-                this.back_project();
-            end
-            if opts.steps(4)
-                idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet);
-            else
-                idif_ic = [];
-            end
-
-            %this.arterial_centerline_ = [];
-            %this.arterial_input_function_ = [];
-        end
-        function out_ic = flirt_centerline(this, target, target_trc)
-            arguments
-                this mlkinetics.MipIdif
-                target {mustBeNonempty}
-                target_trc {mustBeTextScalar} = "unknown"
-            end
-            target = mlfourd.ImagingContext2(target);
-
-            % flirt
-            cl = this.centerline_on_pet;
-            source = this.centerline_source;
-            source_on_target = mlfourd.ImagingContext2( ...
-                source.fqfp+"_on_"+target_trc+".nii.gz");
-            cl_flirt = mlfsl.Flirt( ...
-                'in', source, ...
-                'ref', target, ...
-                'out', source_on_target, ...
-                'omat', this.mat(source_on_target), ...
-                'bins', 256, ...
-                'cost', 'mutualinfo', ...
-                'dof', 6, ...
-                'interp', 'spline', ...
-                'noclobber', false);
-            if ~isfile(source_on_trc.fqfn)
-                % do expensive coreg.
-                cl_flirt.flirt();
-            end
-            assert(isfile(source_on_trc.fqfn))
-
-            % applyxfm
-            out_ic = mlfourd.ImagingContext2( ...
-                fullfile(target.filepath, "centerline_on_"+target_trc+"nii.gz"));
-            cl_flirt.in = cl;
-            cl_flirt.out = out_ic;
-            cl_flirt.interp = "nearestneighbour";
-            cl_flirt.applyXfm();
-        end
-        function [ic] = pet_static_on_anatomy(this)
-            ic = this.pet_avgt_on_tof;
-        end
-        function pet_dyn_on_anatomy(~)
-            error("mlaif:NotImplementedError", "MipIdif");
-        end
     end
 
     methods (Static)
@@ -545,10 +569,16 @@ classdef MipIdif < handle & mlsystem.IHandle
             this.bids_kit_ = opts.bids_kit;
             this.tracer_kit_ = opts.tracer_kit;
             this.scanner_kit_ = opts.scanner_kit;
-            this.pet_dyn_ = this.scanner_kit_.do_make_activity_density();
+            pet_dyn = this.scanner_kit_.do_make_activity_density(); % decayCorrected=true
             med = this.bids_kit_.make_bids_med();
             this.t1w_ = med.t1w_ic;
             this.tof_ = med.tof_ic;
+
+            pet_dyn.relocateToDerivativesFolder();
+            if ~isfile(pet_dyn)
+                save(pet_dyn);
+            end
+            this.pet_dyn_fqfn_ = pet_dyn.fqfn;
 
             if ~isempty(opts.pet_avgt)
                 this.pet_avgt_ = mlfourd.ImagingContext2(opts.pet_avgt);
@@ -591,7 +621,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         centerline_on_pet_
         pet_avgt_
         pet_avgt_on_tof_
-        pet_dyn_
+        pet_dyn_fqfn_
         pet_mipt_
         pet_mipt_on_tof_
         product_
@@ -618,6 +648,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             idif_ic = mlfourd.ImagingContext2(aif);
             idif_ic.filepath = this.pet_dyn.filepath;
             idif_ic.fileprefix = sprintf("%s_%s", this.pet_dyn.fileprefix, stackstr(3));
+            idif_ic.json_metadata = this.pet_dyn.json_metadata;
             idif_ic.save();
             this.product_ = idif_ic;
         end

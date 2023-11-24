@@ -94,6 +94,33 @@ classdef Idif < handle & mlsystem.IHandle
             art = mlaif.Artery( ...
                 T, ...
                 'tracer', convertStringsToChars(this.tracer), ...
+                'kernel', this.kernel, ...
+                'model_kind', '3bolus');
+            art = art.solve();
+            art.plot()
+            q = art.deconvolved();
+            ifc__.img = q;
+            ifc__.fileprefix = ifc__.fileprefix+"-deconvBayes2";
+            ifc__.save();
+
+            if opts.return_ic
+                q = mlfourd.ImagingContext2(ifc__);
+            end     
+        end
+        function q = deconvBayes3(this, opts)
+            arguments
+                this mlaif.Idif
+                opts.return_ic logical = true
+            end
+
+            ifc__ = this.Measurement.imagingFormat;
+            j = ifc__.json_metadata;
+            timesMid = ascol(j.timesMid);
+            activityDensity = ascol(ifc__.img);
+            T = table(timesMid, activityDensity);
+            art = mlaif.Artery( ...
+                T, ...
+                'tracer', convertStringsToChars(this.tracer), ...
                 'kernel', 1, ...
                 'model_kind', '3bolus-window10');
             art = art.solve();

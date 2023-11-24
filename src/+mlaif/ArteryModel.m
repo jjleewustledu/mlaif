@@ -49,18 +49,45 @@ classdef ArteryModel
     end 
 
     methods (Static)
-        function rho = decay_corrected(rho, tracer, indices)
-            import mlaif.ArteryModel.halflife
-            timesMid = 0.5:(length(rho)-0.5);
-            rho = rho .* 2.^(timesMid/halflife(tracer));
-            rho = rho(indices);
-        end
-        function rho = decay_corrected_from_table(T, tracer)
-            import mlaif.ArteryModel.halflife
-            timesMid = T.timesMid;
-            rho = T.activityDensity;
-            rho = rho .* 2.^(timesMid/halflife(tracer));
+        function rho = decay_corrected_from_table(T, tracer, opts)
+            arguments
+                T table
+                tracer {mustBeTextScalar}
+                opts.timeShift double = 0
+                opts.sign = 1
+            end
+            timeShift = floor(opts.timeShift);
+            times = T.timesMid - timeShift;
+            f = mlaif.ArteryModel.decayCorrectionFactors( ...
+                tracer=tracer, timeShift=timeShift, timeForDecayCorrection=0, times=times);
+            rho = T.activityDensity .* f.^opts.sign;
             rho = asrow(rho);
+        end
+        function f = decayCorrectionFactors(opts)
+            %% DECAYCORRECTIONFACTORS increases observed emissions, removing effects of radiodecay.
+            %  See also:  https://niftypet.readthedocs.io/en/latest/tutorials/corrqnt.html
+            %  Args:
+            %      opts.tracer {mustBeTextScalar}
+            %      opts.timeShift double = 0
+            %      opts.timeForDecayCorrection double = 0
+            %      opts.times double = [], as row | as col
+            %  Returns:
+            %      f, a vector with same shape at this.times.
+            
+            arguments
+                opts.tracer {mustBeTextScalar}
+                opts.timeShift double = 0
+                opts.timeForDecayCorrection double = 0
+                opts.times double = [] % as row | as col
+            end
+
+            import mlaif.ArteryModel.halflife
+            
+            lambda = log(2)/halflife(opts.tracer);
+            times1 = opts.times - opts.timeForDecayCorrection - opts.timeShift;
+            taus = (times1(2:end) - times1(1:end-1));
+            taus(end+1) = taus(end);
+            f = lambda*taus ./ (exp(-lambda*times1).*(1 - exp(-lambda*taus)));
         end
         function rho = deconvolved(ks, N, kernel, tracer, model_kind)
             soln = mlaif.ArteryModel.solution(ks, N, tracer, model_kind);

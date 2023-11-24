@@ -89,17 +89,21 @@ classdef ArteryModel
             taus(end+1) = taus(end);
             f = lambda*taus ./ (exp(-lambda*times1).*(1 - exp(-lambda*taus)));
         end
-        function rho = deconvolved(ks, N, kernel, tracer, model_kind)
-            soln = mlaif.ArteryModel.solution(ks, N, tracer, model_kind);
+        function qs = deconvolved(M0, ks, N, kernel, tracer, model_kind)
             baseline_frac = ks(9);
-            if ~isvector(kernel)
-                rho = (1 - baseline_frac)*soln;
-                return
+            qs = mlaif.ArteryModel.solution(ks, N, tracer, model_kind);            
+            if ~isscalar(kernel)
+                % adjust kernel integral as trapz
+                card_kernel = trapz(kernel);
+                conv_sk = conv(qs, kernel); % ~1
+                max_sk = max(conv_sk(1:N)); % ~1
+                qs = qs*(card_kernel/max_sk); 
+                qs = M0*((1 - baseline_frac)*qs + baseline_frac);
             end
-            conv_sk = conv(soln, kernel);
-            max_sk = max(conv_sk(1:N));
-            card_kernel = trapz(kernel);
-            rho = (1 - baseline_frac)*(card_kernel/max_sk)*soln; 
+            if contains(model_kind, "window")
+                scale = ks(10);
+                qs = scale*M0*((1 - baseline_frac)*qs + baseline_frac);
+            end
         end
         function tau = halflife(tracer)
             arguments
@@ -115,6 +119,15 @@ classdef ArteryModel
                     error('mlan:ValueError', ...
                         'ArteryModel.halflife.tracer = %s', tracer)
             end            
+        end
+        function p = jeffreys_prior(t)
+            arguments
+                t double
+            end
+            tmax = max(t);
+            tmin = max(eps, min(t));
+            p = 1./(t*log(tmax/tmin));
+            p = p/sum(p);
         end
         function loss = loss_function(ks, kernel, tracer, model_kind, Measurement)
             import mlaif.ArteryModel.sampled
@@ -143,35 +156,38 @@ classdef ArteryModel
         end
         function m = preferredMap()
             m = containers.Map;
-            m('k1') = struct('min',  0.5,   'max',   1.5,  'init',  0.5,  'sigma', 0.05); % alpha
-            m('k2') = struct('min',  0.05,  'max',   0.15, 'init',  0.05, 'sigma', 0.05); % beta in 1/sec
-            m('k3') = struct('min',  1,     'max',   3,    'init',  1,    'sigma', 0.05); % p
-            m('k4') = struct('min',  0,     'max',   1,    'init',  0,    'sigma', 0.05); % |dp2| for 2nd bolus
-            m('k5') = struct('min',  0,     'max', 120,    'init',  0,    'sigma', 0.05); % t0 in sec
-            m('k6') = struct('min',  0.1,   'max',   0.3,  'init',  0.2,  'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
-            m('k7') = struct('min',  0.05,  'max',   0.1,  'init',  0.05, 'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
-            m('k8') = struct('min', 15,     'max',  90,    'init', 30,    'sigma', 0.05); % recirc delay in sec
-            m('k9') = struct('min',  0.0,   'max',   0,    'init',  0,    'sigma', 0.05); % baseline amplitude fraction \approx 0.05
+            m('k1')  = struct('min',  0.5,   'max',   1.5,  'init',  0.5,  'sigma', 0.05); % alpha
+            m('k2')  = struct('min',  0.05,  'max',   0.15, 'init',  0.05, 'sigma', 0.05); % beta in 1/sec
+            m('k3')  = struct('min',  1,     'max',   3,    'init',  1,    'sigma', 0.05); % p
+            m('k4')  = struct('min',  0,     'max',   1,    'init',  0,    'sigma', 0.05); % |dp2| for 2nd bolus
+            m('k5')  = struct('min',  0,     'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec
+            m('k6')  = struct('min',  0.1,   'max',   0.3,  'init',  0.2,  'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
+            m('k7')  = struct('min',  0,     'max',   0.1,  'init',  0.05, 'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
+            m('k8')  = struct('min', 15,     'max',  90,    'init', 30,    'sigma', 0.05); % recirc delay in sec
+            m('k9')  = struct('min',  0,     'max',   0.02, 'init',  0,    'sigma', 0.05); % baseline amplitude fraction \approx 0.05
+            m('k10') = struct('min',  1,     'max',   3,    'init',  1,    'sigma', 0.05); % scaling that is not conserved by sampled()
         end    
-        function qs = sampled(ks, N, kernel, tracer, model_kind)
+        function qs = sampled(M0, ks, N, kernel, tracer, model_kind)
             %% @return the Bayesian estimate of the measured AIF, including baseline, scaled to unity.
+            %  no baseline modelled for model_kind ~ "window"
             
-            baseline_frac = ks(9);
-            scale_frac = 1 - baseline_frac;
-            
-            if isvector(kernel)
+            baseline_frac = ks(9);            
+            if ~isscalar(kernel)
                 qs = mlaif.ArteryModel.solution(ks, N, tracer, model_kind);
                 qs = conv(qs, kernel);
                 qs = qs(1:N);
-            end
-            if contains(model_kind, 'window')
+                qs = qs/max(qs);
+                qs = M0*((1 - baseline_frac)*qs + baseline_frac); 
+                return
+            end     
+            if contains(model_kind, "window")
+                scale = ks(10);
                 re = regexp(model_kind, "\S+window(?<W>\d+)\S*", "names");
                 W = str2double(re.W);
                 qs = mlaif.ArteryModel.solution(ks, N+W-1, tracer, model_kind);
+                qs = scale*M0*((1 - baseline_frac)*qs + baseline_frac);
                 qs = mlaif.ArteryModel.move_window(qs, W=W);
-            end            
-            qs = qs/max(qs); % \in [0 1] 
-            qs = scale_frac*qs + baseline_frac; % \in [0 1]   
+            end  
         end
         function qs = solution(ks, N, tracer, model_kind)
             %% @return the idealized true AIF without baseline, scaled to unity.
@@ -187,8 +203,8 @@ classdef ArteryModel
                 qs = ArteryModel.solution_3bolus(ks, N, tracer);
             end
         end
-        function qs = solution_1bolus(ks, N, tracer, p)
-            %% stretched gamma distribution
+        function qs = solution_1bolus(ks, N, ~, p)
+            %% stretched gamma distribution for decay-uncorrected
 
             import mlaif.ArteryModel.slide
             import mlaif.ArteryModel.halflife
@@ -209,8 +225,8 @@ classdef ArteryModel
             qs = qs .* 2.^(-t/halflife(tracer));
             qs = qs/max(qs); % \in [0 1] 
         end
-        function qs = solution_2bolus(ks, N, tracer, p)
-            %% stretched gamma distribution + rising steadystate
+        function qs = solution_2bolus(ks, N, ~, p)
+            %% stretched gamma distribution + rising steadystate for decay-uncorrected
 
             import mlaif.ArteryModel.slide
             import mlaif.ArteryModel.halflife
@@ -238,7 +254,8 @@ classdef ArteryModel
             qs = qs/max(qs); % \in [0 1] 
         end
         function qs = solution_3bolus(ks, N, tracer)
-            %% stretched gamma distribution + rising steadystate + auxiliary stretched gamma distribution; 
+            %% stretched gamma distribution + rising steadystate + auxiliary stretched gamma distribution 
+            %  for decay-uncorrected;
             %  forcing p2 = p - dp2 < p, to be more dispersive
 
             import mlaif.ArteryModel.solution_1bolus
@@ -266,18 +283,15 @@ classdef ArteryModel
         end
         function qs = move_window(qs, opts)
             arguments
-                qs double
-                opts.W double
+                qs double % asrow in; as row out
+                opts.W double % window length
             end
             
-            %persistent L
-            %if isempty(L)
-                P = length(qs)-opts.W+1;
-                N = P/opts.W;
-                P1 = P + opts.W - 1;
-                L = tril(ones(P,P1), opts.W-1) - tril(ones(P,P1), -1);
-                L = L/opts.W;
-            %end
+            P = length(qs)-opts.W+1;
+            N = P/opts.W;
+            P1 = P + opts.W - 1;
+            L = tril(ones(P,P1), opts.W-1) - tril(ones(P,P1), -1);
+            L = L/opts.W;
             qs = asrow(L*ascol(qs));
         end
         function conc = slide(conc, t, Dt)
@@ -328,7 +342,7 @@ classdef ArteryModel
         function this = adjustMapForTracer(this)
             switch upper(this.tracer)
                 case {'FDG' '18F'}
-                    this.map('k5') = struct('min', 10,    'max',  40,    'init', 25,    'sigma', 0.05); % t0 in sec   
+                    this.map('k5') = struct('min',  0,    'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec   
                     this.map('k6') = struct('min', 0.05,  'max',   0.5,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1)  
                     this.map('k7') = struct('min', 0.05,  'max',   0.25, 'init',  0.05, 'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
                     this.map('k8') = struct('min', 5,     'max',  20,    'init', 10,    'sigma', 0.05); % recirc delay in sec
@@ -342,12 +356,12 @@ classdef ArteryModel
                     this.map('k6') = struct('min',  0.05, 'max',   0.5,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1)      
 
                     this.map('k8') = struct('min', 30,    'max', 120,    'init', 60,    'sigma', 0.05); % recirc delay in sec
-                    this.map('k9') = struct('min',  0.02, 'max',   0.5,  'init',  0.1,  'sigma', 0.05); % baseline amplitude fraction \approx 0.05
                 case 'OO'
                     % allow double inhalation
                     this.map('k1') = struct('min', 1,     'max',   5,    'init',  1,    'sigma', 0.05); % alpha
                     this.map('k2') = struct('min', 0.1,   'max',  25,    'init',  0.1,  'sigma', 0.05); % beta
-                    this.map('k5') = struct('min', 0,     'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec   
+
+                    this.map('k5') = struct('min', 5,     'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec   
 
                     this.map('k7') = struct('min', 0.05,  'max',   0.49, 'init',  0.05, 'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
                     this.map('k8') = struct('min', eps,   'max',  30,    'init', 15,    'sigma', 0.05); % recirc delay in sec

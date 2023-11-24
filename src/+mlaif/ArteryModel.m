@@ -130,28 +130,32 @@ classdef ArteryModel
             p = p/sum(p);
         end
         function loss = loss_function(ks, kernel, tracer, model_kind, Measurement)
+            %% generally needs matching to DC and DUC; consider also using Jeffreys' prior to weight times
+            %  Jeffreys' prior:
+            %    indices = 1:N;
+            %    indices = indices(positive);
+            %    p = mlaif.ArteryModel.jeffreys_prior(indices);
+
             import mlaif.ArteryModel.sampled
-            import mlaif.ArteryModel.decay_corrected
             import mlaif.ArteryModel.decay_corrected_from_table
+            import mlaif.ArteryModel.jeffreys_prior
 
-            times_ = asrow(Measurement.timesMid - Measurement.timesMid(1)); % discrete
-            indices_ = floor(times_) + 1; % discrete
-            measurement_ = asrow(Measurement.activityDensity); % discrete
-            N = length(measurement_);
+            measurement = asrow(Measurement.activityDensity); % discrete
+            estimation = sampled(max(measurement), ks, length(measurement), kernel, tracer, model_kind);
+            positive = measurement > 0.001*max(measurement);
+            eoverm = estimation(positive)./measurement(positive);
 
-            estimation = sampled(ks, N, kernel, tracer, model_kind); % \in [0 1]
-            estimation_ = estimation(indices_);
-            measurement__ = measurement_/max(measurement_); % \in [0 1] 
-            positive_ = measurement__ > 0.01;
-            eoverm_ = estimation_(positive_)./measurement__(positive_);
-            
-            estimation_dc_ = decay_corrected(estimation, tracer, indices_);
-            estimation_dc__ = estimation_dc_/max(estimation_dc_); % \in [0 1]  
-            measurement_dc_ = decay_corrected_from_table(Measurement, tracer);
-            measurement_dc_ = measurement_dc_/max(measurement_dc_); % \in [0 1]             
-            eoverm_dc = estimation_dc__(positive_)./measurement_dc_(positive_);
-            
-            loss = mean(abs(1 - 0.5*eoverm_ - 0.5*eoverm_dc));
+            measurement_duc = decay_corrected_from_table(Measurement, tracer, timeShift=ks(5), sign=1);
+            T_est = Measurement; T_est.activityDensity = ascol(estimation);
+            estimation_duc = decay_corrected_from_table(T_est, tracer, timeShift=ks(5), sign=1);                    
+            eoverm_duc = estimation_duc(positive)./measurement_duc(positive);            
+
+            % timesMid = asrow(Measurement.timesMid);
+            % timesMid = timesMid(positive);
+            % eoverm_jeff = 0.5*jeffreys_prior(timesMid).*(eoverm + eoverm_duc);
+            % eoverm_jeff = (sum(eoverm)/sum(eoverm_jeff))*eoverm_jeff;
+            % loss = mean(abs(1 - eoverm_jeff));
+            loss = mean(abs(1 - 0.5*(eoverm + eoverm_duc)));
             loss = double(loss);
         end
         function m = preferredMap()

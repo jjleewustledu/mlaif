@@ -26,16 +26,16 @@ classdef ArterySimulAnneal < mlio.AbstractIO
         ks
         ks_names
         model_kind
-        results
+        product
         tracer
     end
 
-	methods %% GET        
+	methods %% GET
         function g = get.kernel(this)
             g = this.model.kernel;
         end
         function g = get.ks(this)
-            g = this.results_.ks;
+            g = this.product_.ks;
         end
         function g = get.ks_names(this)
             g = this.model.knames;
@@ -43,8 +43,8 @@ classdef ArterySimulAnneal < mlio.AbstractIO
         function g = get.model_kind(this)
             g = this.model.model_kind;
         end
-        function g = get.results(this)
-            g = this.results_;
+        function g = get.product(this)
+            g = this.product_;
         end
         function g = get.tracer(this)
             g = this.model.tracer;
@@ -59,113 +59,65 @@ classdef ArterySimulAnneal < mlio.AbstractIO
                 fprintf('\t%s = %g\n', this.ks_names{ky}, this.ks(ky));
             end 
             fprintf('\tloss = %g\n', this.loss())
-            keys = this.map.keys;
+            keys = natsort(this.map.keys);
             for ky = 1:length(this.ks)
                 fprintf('\tmap(''%s'') => %s\n', this.ks_names{ky}, ...
                     join(struct2str(this.map(keys{ky}), orientation='horz')));
             end
         end
         function Q = loss(this)
-            Q = this.results_.sse;
+            Q = this.product_.sse;
         end
-        function h = plot_dc(this, varargin)
-            ip = inputParser;
-            addParameter(ip, 'showKernel', false, @islogical)
-            addParameter(ip, 'xlim', [-10 200], @isnumeric)
-            addParameter(ip, 'ylim', [], @isnumeric)
-            addParameter(ip, 'zoom', 1, @isnumeric)
-            parse(ip, varargin{:})
-            ipr = ip.Results;
-            if ~isvector(this.kernel)
-                ipr.showKernel = false;
+        function h = plot(this, opts)
+            arguments
+                this mlaif.ArterySimulAnneal
+                opts.showKernel logical = true
+                opts.xlim double = [-10 200]
+                opts.ylim double = []
+                opts.zoom double = []
             end
-            this.zoom = ipr.zoom;
-            deconvolved = @mlaif.ArteryModel.deconvolved;
-            sampled = @mlaif.ArteryModel.sampled;
-            decay_corrected = @mlaif.ArteryModel.decay_corrected;
-            decay_corrected_from_table = @mlaif.ArteryModel.decay_corrected_from_table;
-            M_activityDensity = decay_corrected_from_table(this.Measurement, this.tracer);
-            N = size(this.Measurement, 1);
-            M0 = max(M_activityDensity);
-            
-            h = figure;
-            samp = M0*sampled(this.ks, N, this.kernel, this.tracer, this.model_kind);
-            samp = decay_corrected(samp, this.tracer, 1:N);
-            deconvolved = M0*deconvolved(this.ks, N, this.kernel, this.tracer, this.model_kind);
-            timesMid = 0.5:N-0.5;
+            this.zoom = opts.zoom;
+            timesMid = asrow(this.Measurement.timesMid);
+            measurement = asrow(this.Measurement.activityDensity);
+            N = length(measurement);
+            M0 = max(measurement);                       
+            samp = this.model.sampled(M0, this.ks, N, this.kernel, this.tracer, this.model_kind);
+            deconvolved = this.model.deconvolved(M0, this.ks, N, this.kernel, this.tracer, this.model_kind);
             
             if isempty(this.zoom)
-                this.zoom = max(deconvolved)/max(this.kernel)/2;
+                % show kernel as 1/2 amplitude of deconvolved
+                this.zoom = max(deconvolved)/max(this.kernel)/2; 
             end
             if this.zoom ~= 1
                 leg_kern = sprintf('kernel x%g', this.zoom);
             else
                 leg_kern = 'kernel';
             end
-            if ipr.showKernel
-                plot(asrow(this.Measurement.timesMid), asrow(M_activityDensity), 'o', ...
-                    timesMid, samp, ':', ...
-                    timesMid, deconvolved, '-', ...
-                    timesMid, this.zoom*this.kernel, '--', 'LineWidth', 2)
-                legend({'measured', 'estimated', 'deconvolved', leg_kern})
-            else
-                plot(asrow(this.Measurement.timesMid), asrow(M_activityDensity), 'o', ...
-                    timesMid, samp, ':', 'LineWidth', 2)
-                legend({'measured', 'estimated'}, 'FontSize', 10)
-            end
-            if ~isempty(ipr.xlim); xlim(ipr.xlim); end
-            if ~isempty(ipr.ylim); ylim(ipr.ylim); end
-            xlabel('times / s')
-            ylabel('activity / (Bq/mL)')
-            annotation('textbox', [.25 .5 .5 .2], 'String', sprintfModel(this), 'FitBoxToText', 'on', 'FontSize', 10, 'LineStyle', 'none')
-            title([clientname(false, 2) ' DECAY-CORRECTED for ' this.tracer], 'Interpreter', 'none')
-        end
-        function h = plot(this, varargin)
-            ip = inputParser;
-            addParameter(ip, 'showKernel', false, @islogical)
-            addParameter(ip, 'xlim', [-10 200], @isnumeric)
-            addParameter(ip, 'ylim', [], @isnumeric)
-            addParameter(ip, 'zoom', 1, @isnumeric)
-            parse(ip, varargin{:})
-            ipr = ip.Results;
-            if ~isvector(this.kernel)
-                ipr.showKernel = false;
-            end
-            this.zoom = ipr.zoom;
-            M = this.Measurement;
-            N = M.timesMid(end) + 1;
-            M0 = max(M.activityDensity);
-                        
+ 
             h = figure;
-            samp = M0*this.model.sampled(this.ks, N, this.kernel, this.tracer, this.model_kind);
-            deconvolved = M0*this.model.deconvolved(this.ks, N, this.kernel, this.tracer, this.model_kind);
-            timesMid = 0.5:N-0.5;
-            
-            if isempty(this.zoom)
-                this.zoom = max(deconvolved)/max(this.kernel)/2;
-            end
-            if this.zoom ~= 1
-                leg_kern = sprintf('kernel x%g', this.zoom);
+            if opts.showKernel && ~isscalar(this.kernel)
+                hold('on')
+                plot(timesMid, measurement, 'o', 'MarkerEdgeColor', "#0072BD")
+                plot(timesMid, samp, '--', 'Color', "#A2142F", 'LineWidth', 2)
+                plot(timesMid, deconvolved, '-', 'Color', "#0072BD", 'LineWidth', 2)
+                plot(timesMid, this.zoom*this.kernel(1:N), '--', 'Color', "#EDB120", 'LineWidth', 2)
+                legend({'measured', 'estimated', 'deconvolved', leg_kern}, 'FontSize', 12)
+                hold('off')
             else
-                leg_kern = 'kernel';
+                hold('on')
+                plot(timesMid, measurement, 'o', 'MarkerEdgeColor', "#0072BD")
+                plot(timesMid, samp, '--', 'Color', "#A2142F", 'LineWidth', 2)
+                plot(timesMid, deconvolved, '-', 'Color', "#0072BD", 'LineWidth', 2)
+                legend({'measured', 'estimated', 'deconvolved'}, 'FontSize', 12)
+                hold('off')
             end
-            if ipr.showKernel
-                plot(asrow(M.timesMid), asrow(M.activityDensity), 'o', ...
-                    timesMid, samp, ':', ...
-                    timesMid, deconvolved, '-', ...
-                    timesMid, this.zoom*this.kernel, '--', 'LineWidth', 2)
-                legend({'measured', 'estimated', 'deconvolved', leg_kern})
-            else
-                plot(asrow(M.timesMid), asrow(M.activityDensity), 'o', ...
-                    timesMid, samp, ':', 'LineWidth', 2)
-                legend({'measured', 'estimated'}, 'FontSize', 10)
-            end
-            if ~isempty(ipr.xlim); xlim(ipr.xlim); end
-            if ~isempty(ipr.ylim); ylim(ipr.ylim); end
-            xlabel('times / s')
-            ylabel('activity / (Bq/mL)')
+            if ~isempty(opts.xlim); xlim(opts.xlim); end
+            if ~isempty(opts.ylim); ylim(opts.ylim); end
+            xlabel('times / s', FontSize=14, FontWeight='bold')
+            ylabel('activity / (Bq/mL)', FontSize=14, FontWeight='bold')
             annotation('textbox', [.25 .5 .3 .3], 'String', sprintfModel(this), 'FitBoxToText', 'on', 'FontSize', 10, 'LineStyle', 'none')
-            title(clientname(false, 2))
+            title(clientname(false, 2), FontSize=14)
+            set(h, position=[100,100,1000,618])
         end
         function save(this)
             save([this.fileprefix '.mat'], this);
@@ -173,13 +125,15 @@ classdef ArterySimulAnneal < mlio.AbstractIO
         function saveas(this, fn)
             save(fn, this);
         end
-        function this = solve(this, varargin)
-            %% @param required loss_function is function_handle.
+        function this = solve(this, loss_function)
+            %% Args:
+            %      this mlaif.ArterySimulAnneal
+            %      loss_function function_handle
             
-            ip = inputParser;
-            addRequired(ip, 'loss_function', @(x) isa(x, 'function_handle'))
-            parse(ip, varargin{:})
-            ipr = ip.Results;
+            arguments
+                this mlaif.ArterySimulAnneal
+                loss_function function_handle
+            end
             
             options_fmincon = optimoptions('fmincon', ...
                 'FunctionTolerance', 1e-12, ...
@@ -208,11 +162,11 @@ classdef ArterySimulAnneal < mlio.AbstractIO
                     'TemperatureFcn', 'temperatureexp');
             end
  			[ks_,sse,exitflag,output] = simulannealbnd( ...
-                @(ks__) ipr.loss_function( ...
+                @(ks__) loss_function( ...
                        ks__, this.kernel, this.tracer, this.model_kind, this.Measurement), ...
                 this.ks0, this.ks_lower, this.ks_upper, options); 
             
-            this.results_ = struct('ks0', this.ks0, 'ks', ks_, 'sse', sse, 'exitflag', exitflag, 'output', output); 
+            this.product_ = struct('ks0', this.ks0, 'ks', ks_, 'sse', sse, 'exitflag', exitflag, 'output', output); 
             if ~this.quiet
                 fprintfModel(this)
             end
@@ -221,13 +175,13 @@ classdef ArterySimulAnneal < mlio.AbstractIO
             end
         end 
         function s = sprintfModel(this)
-            s = sprintf('RadialArterySimulAnnel:\n');
+            s = sprintf('ArterySimulAnnel:\n');
             s = [s sprintf('%s %s:\n', this.tracer, this.model_kind)];
             for ky = 1:length(this.ks)
                 s = [s sprintf('\t%s = %g\n', this.ks_names{ky}, this.ks(ky))]; %#ok<AGROW>
             end
             s = [s sprintf('\tloss = %g\n', this.loss())];
-            keys = this.map.keys;
+            keys = natsort(this.map.keys);
             for ky = 1:length(this.ks)
                 s = [s sprintf('\tmap(''%s'') => %s\n', this.ks_names{ky}, ...
                     join(struct2str(this.map(keys{ky}), orientation='horz')))]; %#ok<AGROW>
@@ -251,7 +205,6 @@ classdef ArterySimulAnneal < mlio.AbstractIO
             this.model = this.context.model;               % copy objects for speed            
             this.map = this.model.map;                     %
             this.Measurement = this.context.Measurement;   %
-            this.times_sampled = this.model.times_sampled; % 
             this.sigma0 = opts.sigma0;
 
             [this.ks_lower,this.ks_upper,this.ks0] = remapper(this);
@@ -261,7 +214,7 @@ classdef ArterySimulAnneal < mlio.AbstractIO
     %% PROTECTED
     
     properties (Access = protected)
-        results_
+        product_
     end
     
     methods (Access = protected)

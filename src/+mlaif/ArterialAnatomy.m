@@ -264,6 +264,7 @@ classdef (Abstract) ArterialAnatomy < handle & matlab.mixin.Heterogeneous & matl
             this.anatomy_ = mlfourd.ImagingContext2(ipr.anatomy);
             try
                 this.anatomy_ = this.bids.prepare_derivatives(this.anatomy_);
+                this.anatomy_ = this.bids.prepare_orient_std(this.anatomy_);
             catch
             end
             this.anatTag_ = 'anat';

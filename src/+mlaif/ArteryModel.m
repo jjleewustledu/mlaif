@@ -15,27 +15,24 @@ classdef ArteryModel
  		map
         model_kind
         t0_forced
-        times_sampled
         tracer
     end
 
 	methods		  
  		function this = ArteryModel(opts)
             %%  Args:
-            %   opts.tracer {mustBeTextScalar} = 'FDG'
+            %   opts.tracer {mustBeTextScalar} = '15O'
             %   opts.model_kind = '3bolus'
             %   opts.kernel double = 1
             %   opts.map = []
             %   opts.t0_forced = []
-            %   opts.times_sampled = []
             
             arguments
-                opts.tracer {mustBeTextScalar} = 'FDG'
+                opts.tracer {mustBeTextScalar} = '15O'
                 opts.model_kind = '3bolus'
                 opts.kernel double = 1
                 opts.map = []
                 opts.t0_forced = []
-                opts.times_sampled = []
             end
             if isempty(opts.map)
                 opts.map = mlaif.ArteryModel.preferredMap();
@@ -47,8 +44,7 @@ classdef ArteryModel
             this.t0_forced = opts.t0_forced;
             this = this.adjustMapForTracer();
             this = this.adjustMapForModelKind();
-            this.kernel = opts.kernel;
-            this.times_sampled = opts.times_sampled; 			
+            this.kernel = opts.kernel;		
  		end
     end 
 

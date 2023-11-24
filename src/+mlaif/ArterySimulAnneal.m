@@ -13,15 +13,12 @@ classdef ArterySimulAnneal < mlio.AbstractIO
         visualize = false
         visualize_anneal = false
         zoom = 1
-    end
 
-	properties
         context
-        Measurement          % external data
+        Measurement          % external data as table
         map                  % 
-        model                %
+        model                % mlaif.ArteryModel
         sigma0 = 0.05        % fraction of Measurement < 1
-        times_sampled        % numeric times for Measurement; midpoints of frames for PET
     end
     
 	properties (Dependent) 

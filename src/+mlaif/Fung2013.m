@@ -421,6 +421,7 @@ classdef Fung2013 < handle & mlsystem.IHandle
             idif_ic = aif.product;
             idif_ic.filepath = aif.filepath;
             idif_ic.fileprefix = sprintf("%s_%s", this.pet_dyn_.fileprefix, stackstr(3));
+            idif_ic.json_metadata = this.pet_dyn.json_metadata;
             idif_ic.save();
         end
     end

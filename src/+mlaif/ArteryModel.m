@@ -1,12 +1,13 @@
 classdef ArteryModel
-    %% line1
-    %  line2
+    %% ARTERYMODEL supports a strategy design pattern for inferring cerebral AIFs
+    %  from measurements of dynamic imaging and an arbitrary model kernel for delay and dispersion.
+    %  Measurements should be decay-corrected as typically done by reconstruction methods.
     %  
     %  Created 28-Apr-2023 14:36:00 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/src/+mlaif.
     %  Developed on Matlab 9.14.0.2239454 (R2023a) Update 1 for MACI64.  Copyright 2023 John J. Lee.
     
     properties (Constant)
-        knames = {'\alpha' '\beta' 'p' 'dp_2' 't_0' 'steadystate\_fraction' 'recirc\_fraction' 'recirc\_delay' 'baseline\_fraction'}
+        knames = {'\alpha' '\beta' 'p' 'dp_2' 't_0' 'steadystate\_fraction' 'recirc\_fraction' 'recirc\_delay' 'baseline\_fraction' 'scale'}
     end
     
 	properties 	

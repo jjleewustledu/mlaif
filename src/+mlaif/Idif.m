@@ -25,7 +25,7 @@ classdef Idif < handle & mlsystem.IHandle
             end
 
             try
-                dt = this.json_.start_times(2) - this.json_.start_times(1);
+                dt = this.json_.starts(2) - this.json_.starts(1);
                 timesF = cumsum(this.json_.taus);
                 this.timeInterpolants_ = 0:dt:timesF(end);
                 g = this.timeInterpolants_;
@@ -67,7 +67,7 @@ classdef Idif < handle & mlsystem.IHandle
             ral = mlswisstrace.RadialArteryLee2021( ...
                 'tracer', convertStringsToChars(this.tracer), ...
                 'kernel', this.kernel, ...
-                'model_kind', '2bolus', ...
+                'model_kind', '3bolus', ...
                 'Measurement', asrow(double(this.Measurement)));
             ral = ral.solve();
             ral.plot()
@@ -100,7 +100,7 @@ classdef Idif < handle & mlsystem.IHandle
             art.plot()
             q = art.deconvolved();
             ifc__.img = q;
-            ifc__.fileprefix = ifc__.fileprefix+"-deconvBayes";
+            ifc__.fileprefix = ifc__.fileprefix+"-deconvBayes2";
             ifc__.save();
 
             if opts.return_ic
@@ -110,7 +110,8 @@ classdef Idif < handle & mlsystem.IHandle
         function k = kernel(this)
             k = zeros(size(this.timeInterpolants));
             Nk = this.json_.taus(1);
-            k(1:Nk) = 1/Nk;
+            t0 = 0; % round(this.json_.taus(1)/2);
+            k(t0+1:t0+Nk) = 1/Nk;
         end
         function plot_deconv(this)
         end
@@ -210,7 +211,7 @@ classdef Idif < handle & mlsystem.IHandle
         end
         function L = moving_aver_oper(opts)
             arguments
-                opts.start_times double = 0:9
+                opts.starts double = 0:9
                 opts.taus double = []
                 opts.tracer = ""
             end
@@ -226,7 +227,7 @@ classdef Idif < handle & mlsystem.IHandle
                         error("mlkinetics:ValueError", "%s: tracer->%s", stackstr(), this.tracer)
                 end
             end
-            M = length(opts.start_times);
+            M = length(opts.starts);
             N = length(opts.taus);
             P = M*N;
             P1 = M*N + M - 1;

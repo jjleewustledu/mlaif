@@ -1,18 +1,18 @@
 classdef Artery < handle & mlsystem.IHandle
     %% ARTERY provides a strategy design pattern for inferring cerebral AIFs
-    %  from measurements sampling the radial artery and an arbitrary model kernel for delay and dispersion.
+    %  from measurements of dynamic imaging and an arbitrary model kernel for delay and dispersion.
+    %  Measurements should be decay-corrected as typically done by reconstruction methods.
     %  
     %  Created 28-Apr-2023 14:34:29 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/src/+mlaif.
     %  Developed on Matlab 9.14.0.2239454 (R2023a) Update 1 for MACI64.  Copyright 2023 John J. Lee.
     
 	properties  
-        Measurement % expose for performance when used strategies for solve
+        Measurement % expose for performance when using strategies for solve
         model       %
         units
     end
 
     properties (Dependent)
-        varNameDecayCorrected
         strategy
     end
 
@@ -20,39 +20,29 @@ classdef Artery < handle & mlsystem.IHandle
         function g = get.strategy(this)
             g = this.strategy_;
         end
-        function g = get.varNameDecayCorrected(this)
-            vars = this.Measurement.Properties.VariableNames;
-            indicator_dc = contains(vars, 'dc', IgnoreCase=true) | contains(vars, 'decay', IgnoreCase=true);
-            if any(indicator_dc)
-                g = vars{indicator_dc};
-                return
-            end
-            g = [];
-        end
     end
 
     methods
         function this = Artery(Measurement, units, opts)
             %% ARTERY 
-            %  @param Measurement is a table:  [timesMid, ]activityDensity in [sec, ]Bq/mL.
+            %  @param Measurement is a table constructed from dynamic imaging that is decay-corrected:  
+            %                     [timesMid, ]activityDensity in [sec, ]Bq/mL.
             %  @param solver is in {'simulanneal'}.
 
             %  for mlaif.ArteryModel: 
             %  @param tracer, passed to model.
             %  @param model_kind is char, e.g. '1bolus', '2bolus', '3bolus', '3bolus-window10', etc., passed to model.
-            %  @param map is a containers.Map.  Default := ArteryModel.preferredMap.
  			%  @param kernel is numeric, default := 1.
             %  @param t0_forced is scalar, default empty, passed to model.
             %
             %  for mlaif.ArterySimulAnneal:
             %  @param context is mlaif.Artery.
-            %  @param fileprefix.
 
             arguments
                 Measurement table
                 units struct = struct("timesMid", "sec", "activityDensity", "Bq/mL")
                 opts.solver string {mustBeTextScalar} = "simulanneal"
-                opts.tracer {mustBeTextScalar} = 'FDG'
+                opts.tracer {mustBeTextScalar} = '15O'
                 opts.model_kind {mustBeTextScalar} = '3bolus'
                 opts.kernel double = 1
             end
@@ -67,8 +57,7 @@ classdef Artery < handle & mlsystem.IHandle
                 case "simulanneal"
                     this.strategy_ = mlaif.ArterySimulAnneal(context=this);
                 otherwise
-                    error("mlaif:NotImplementedError", ...
-                        "Artery.ipr.solver->%s", ipr.solver)
+                    error("mlaif:NotImplementedError", "Artery.ipr.solver->%s", ipr.solver)
             end
         end
 
@@ -77,16 +66,13 @@ classdef Artery < handle & mlsystem.IHandle
             N = size(this.Measurement, 1);
             ks = this.strategy_.ks;
             mdl = this.model;
-            rho = M0*this.model.deconvolved(ks, N, mdl.kernel, mdl.tracer, mdl.model_kind);
+            rho = this.model.deconvolved(M0, ks, N, mdl.kernel, mdl.tracer, mdl.model_kind);
         end
         function Q = loss(this)
             Q = this.strategy_.loss();
         end
         function h = plot(this, varargin)
             h = this.strategy_.plot(varargin{:});
-        end
-        function h = plot_dc(this, varargin)
-            h = this.strategy_.plot_dc(varargin{:});
         end
         function this = solve(this, varargin)
             %% @param required loss_function is function_handle.
@@ -123,12 +109,6 @@ classdef Artery < handle & mlsystem.IHandle
                 otherwise
                     error("mlaif:ValueError", ...
                         "Artery.standardize_ctor_args.this.units.timesMid->%s", this.units.timesMid)
-            end
-            if ~isempty(this.varNameDecayCorrected)
-                % convert external decay corrections to decay uncorreted
-                factor = 2.^(-this.Measurement.timesMid/this.model.halflife);
-                this.Measurement.activityDensity = this.Measurement.(this.varNameDecayCorrected).*factor;
-                this.units.activityDensity = this.units.(this.varNameDecayCorrected);
             end
             switch lower(char(this.units.activityDensity)) % convert activityDensity to Bq/mL
                 case {'bqml', 'bq/ml'}

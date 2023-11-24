@@ -311,6 +311,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             T = T(ascol(1:round(opts.frac_select*len)), :);
             tr_single__ = tr_single__(T.indices,:);
             tr_single__ = mean(tr_single__, 1);
+            tr_single__(isnan(tr_single__)) = 0;
 
             % aif from volume-average of brightest 0.05 from centerline
             idif_ic = this.save_idif(mlfourd.ImagingContext2(tr_single__));

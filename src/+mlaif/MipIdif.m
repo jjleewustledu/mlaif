@@ -179,7 +179,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
 
             j = this.pet_dyn.json_metadata;
-            timesMid = j.timesMid;
+            timesMid = asrow(j.timesMid);
             weights = exp(-timesMid/20);
             this.weights_timesMid_ = weights/trapz(timesMid, weights); % normalize to unit AUC
             g = this.weights_timesMid_;

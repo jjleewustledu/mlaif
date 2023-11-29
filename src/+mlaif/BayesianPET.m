@@ -157,10 +157,10 @@ classdef BayesianPET <  mlaif.AbstractAifProblem
             ylabel(sprintf('tracer concentration (%g, %g, %g, %g)', ...
                    max(this.aifConc), max(this.dependentData), max(this.estimatedAif), max(this.estimatedWb)))   
         end
-        function sse  = sumSquaredErrors(this, p)
+        function loss  = sumSquaredErrors(this, p)
             p = num2cell(p);
             [~,wbtac] = this.aifPET.doublePassFast(p{:});
-            sse = norm(this.dependentData  - wbtac)^2  / norm(this.dependentData)^2;
+            loss = norm(this.dependentData  - wbtac)^2  / norm(this.dependentData)^2;
         end
         
         function [aifConc,wb] = estimateData(this)

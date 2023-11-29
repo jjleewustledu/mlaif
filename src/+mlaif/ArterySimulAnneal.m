@@ -38,7 +38,7 @@ classdef ArterySimulAnneal < mlio.AbstractIO
             g = this.product_.ks;
         end
         function g = get.ks_names(this)
-            g = this.model.knames;
+            g = this.model.ks_names;
         end
         function g = get.model_kind(this)
             g = this.model.model_kind;
@@ -66,7 +66,7 @@ classdef ArterySimulAnneal < mlio.AbstractIO
             end
         end
         function Q = loss(this)
-            Q = this.product_.sse;
+            Q = this.product_.loss;
         end
         function h = plot(this, opts)
             arguments
@@ -161,12 +161,12 @@ classdef ArterySimulAnneal < mlio.AbstractIO
                     'ReannealInterval', 200, ...
                     'TemperatureFcn', 'temperatureexp');
             end
- 			[ks_,sse,exitflag,output] = simulannealbnd( ...
+ 			[ks_,loss,exitflag,output] = simulannealbnd( ...
                 @(ks__) loss_function( ...
                        ks__, this.kernel, this.tracer, this.model_kind, this.Measurement), ...
                 this.ks0, this.ks_lower, this.ks_upper, options); 
             
-            this.product_ = struct('ks0', this.ks0, 'ks', ks_, 'sse', sse, 'exitflag', exitflag, 'output', output); 
+            this.product_ = struct('ks0', this.ks0, 'ks', ks_, 'loss', loss, 'exitflag', exitflag, 'output', output); 
             if ~this.quiet
                 fprintfModel(this)
             end

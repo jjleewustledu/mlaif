@@ -2,6 +2,8 @@ classdef Artery < handle & mlsystem.IHandle
     %% ARTERY provides a strategy design pattern for inferring cerebral AIFs
     %  from measurements of dynamic imaging and an arbitrary model kernel for delay and dispersion.
     %  Measurements should be decay-corrected as typically done by reconstruction methods.
+    %
+    %  Is is DEPRECATED.  Prefer mlaif.ArteryLee2021Model, mlpet.ArterySimulAnneal.
     %  
     %  Created 28-Apr-2023 14:34:29 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/src/+mlaif.
     %  Developed on Matlab 9.14.0.2239454 (R2023a) Update 1 for MACI64.  Copyright 2023 John J. Lee.
@@ -55,7 +57,7 @@ classdef Artery < handle & mlsystem.IHandle
                         
             switch opts.solver
                 case "simulanneal"
-                    this.strategy_ = mlaif.ArterySimulAnneal(context=this);
+                    this.strategy_ = mlpet.ArterySimulAnneal(context=this);
                 otherwise
                     error("mlaif:NotImplementedError", "Artery.ipr.solver->%s", ipr.solver)
             end

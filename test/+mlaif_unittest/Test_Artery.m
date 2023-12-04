@@ -1,6 +1,5 @@
 classdef Test_Artery < matlab.unittest.TestCase
-    %% line1
-    %  line2
+    %% TEST_ARTERY is DEPRECATED.  Prefer mlaif.ArteryLee2021Model, mlpet.ArterySimulAnneal.
     %  
     %  Created 28-Apr-2023 14:34:29 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/test/+mlaif_unittest.
     %  Developed on Matlab 9.14.0.2239454 (R2023a) Update 1 for MACI64.  Copyright 2023 John J. Lee.

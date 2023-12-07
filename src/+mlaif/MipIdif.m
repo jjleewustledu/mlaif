@@ -1,5 +1,5 @@
 classdef MipIdif < handle & mlsystem.IHandle
-    %% is a builder.  Use call(this).  
+    %% is a builder.  Start with build_all(this).  
     %  
     %  Created 12-Jun-2023 22:59:36 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/src/+mlaif.
     %  Developed on Matlab 9.14.0.2254940 (R2023a) Update 2 for MACI64.  Copyright 2023 John J. Lee.
@@ -10,7 +10,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         halflife
         pet_avgt % w/ decay-correction, weighted by taus
         pet_avgt_on_tof
-        pet_dyn % read from filesystem to minimize copies of objects in memory
+        pet_dyn % read from filesystem to minimize copies of objects in memory, relocated from sourcedata -> derivatives
         pet_mipt % w/ decay-correction
         pet_mipt_on_tof
         product
@@ -290,13 +290,15 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
 
             % e.g., !ls *tof*T1w*.nii.gz -> 'sub-108293_ses-20210218092914_tof_fl3d_tra_p2_multi-slab_orient-std_on_T1w.nii.gz'
-            tof__ = mlfourd.ImagingContext2(tofobj);
+            %tof__ = mlfourd.ImagingContext2(tofobj);
 
             % e.g., !ls *trc-oc*.nii.gz -> 'sub-108293_ses-20210421144815_trc-oc_proc-dyn_pet_on_T1w.nii.gz'
             tr = mlfourd.ImagingContext2(petobj);
             tr_single = single(tr);
             sz = size(tr_single);
             [tr_mipt,tr_indices] = max(tr, [], 4);
+            cache.tr_mipt = tr_mipt;
+            cache.tr_indices = tr_indices;
             %tr_mipt.view(opts.cl, tof__)
 
             % parse tracobj for tags
@@ -306,6 +308,40 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.mipt_thr = min(50000, opts.mipt_thr);
             end
 
+            % select 0.05*numel of brightest and earliest-arriving voxels from centerline        
+            centerline = logical(opts.cl);
+            cache.centerline = centerline;
+
+            tr_single__ = zeros(dipsum(centerline), sz(4));
+            for t = 1:sz(4)
+                vol_ = tr_single(:,:,:,t);
+                tr_single__(:,t) = vol_(centerline);
+            end
+            cache.tr_single__ = tr_single__;
+
+            brightest = single(tr_mipt);
+            brightest = brightest(centerline);
+            cache.brightest = brightest;
+
+            earliest = single(tr_indices);
+            earliest = earliest(centerline);
+            cache.earliest = earliest;
+
+            len = length(earliest);
+            T = table(ascol(1:len), ascol(brightest), ascol(earliest), variableNames=["indices", "brightest", "earliest"]);
+            T = sortrows(T, [2, 3], {'descend', 'ascend'});
+            cache.T = T;
+            T1 = T(ascol(1:round(opts.frac_select*len)), :);
+            tr_single__ = tr_single__(T1.indices,:);
+            tr_single__ = mean(tr_single__, 1);
+
+            % save cache
+            cache_fqfn = sprintf("%s_%s_cache.mat", this.pet_dyn.fqfp, stackstr());
+            save(cache_fqfn, "cache");
+            
+            % aif from volume-average of brightest 0.05 from centerline
+            idif_ic = this.save_imaging_context(mlfourd.ImagingContext2(tr_single__));
+
             % pcshow
             hold("on")
             toshow = tr_mipt.thresh(opts.mipt_thr); toshow.pcshow()
@@ -314,32 +350,9 @@ classdef MipIdif < handle & mlsystem.IHandle
             saveFigure2(gcf, fullfile(tr.filepath, ...
                 sprintf("pcshow_%s_%s_trc-%s_proc-tof-mips.fig", re.sub, re.ses, re.trc)))
 
-            % select 0.05*numel of brightest and earliest-arriving voxels from centerline        
-            centerline = logical(opts.cl);
-            tr_single__ = zeros(dipsum(centerline), sz(4));
-            for t = 1:sz(4)
-                vol_ = tr_single(:,:,:,t);
-                tr_single__(:,t) = vol_(centerline);
-            end
-            brightest = single(tr_mipt);
-            brightest = brightest(centerline);
-            earliest = single(tr_indices);
-            earliest = earliest(centerline);
-
-            len = length(earliest);
-            T = table(ascol(1:len), ascol(brightest), ascol(earliest), variableNames=["indices", "brightest", "earliest"]);
-            T = sortrows(T, [2, 3], {'descend', 'ascend'});
-            T = T(ascol(1:round(opts.frac_select*len)), :);
-            tr_single__ = tr_single__(T.indices,:);
-            tr_single__ = mean(tr_single__, 1);
-            tr_single__(isnan(tr_single__)) = 0;
-
-            % aif from volume-average of brightest 0.05 from centerline
-            idif_ic = this.save_idif(mlfourd.ImagingContext2(tr_single__));
-
             % plot
             h = figure;
-            timesMid = idif_ic.json_metadata.timesMid;
+            timesMid = idif_ic.json_metadata.timesMid; % previously made numeric
             plot(asrow(timesMid), asrow(idif_ic.imagingFormat.img), ':o')
             fontsize(scale=1.3)
             xlabel("times (s)")
@@ -350,7 +363,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         function idif_ic = build_all(this, opts)
             arguments
                 this mlaif.MipIdif
-                opts.steps logical = true(1, 4)
+                opts.steps logical = true(1, 5)
             end
 
             if opts.steps(1)
@@ -365,7 +378,14 @@ classdef MipIdif < handle & mlsystem.IHandle
             if opts.steps(4)
                 idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet);
             else
-                idif_ic = [];
+                idif_ic = mlfourd.ImagingContext2(this.fqfp + ".nii.gz");
+            end
+            if opts.steps(5)
+                idif_ic = this.build_deconv(idif_ic);
+            end
+
+            if ~contains(this.pet_dyn.filepath, "sourcedata")
+                deleteExisting(this.pet_dyn.fqfp+".*")
             end
 
             %this.arterial_centerline_ = [];
@@ -579,7 +599,7 @@ classdef MipIdif < handle & mlsystem.IHandle
 
     methods (Static)
         function this = create(opts)
-            arguments
+             arguments
                 opts.bids_kit mlkinetics.BidsKit
                 opts.tracer_kit mlkinetics.TracerKit
                 opts.scanner_kit mlkinetics.ScannerKit
@@ -608,7 +628,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             if ~isempty(opts.pet_mipt)
                 this.pet_mipt_ = mlfourd.ImagingContext2(opts.pet_mipt);
             end
-        end                
+        end   
         function fn = json(obj)
             if isa(obj, 'mlfourd.ImagingContext2')
                 fn = strcat(obj.fqfp, '.json');

@@ -547,12 +547,62 @@ classdef MipIdif < handle & mlsystem.IHandle
             cl_flirt.out = out_ic;
             cl_flirt.interp = "nearestneighbour";
             cl_flirt.applyXfm();
+        end        
+        function ff = fqfp(this, opts)
+            %% seeks out pertinent fqfp in derivatives, not sourcedata
+
+            arguments
+                this mlaif.MipIdif
+                opts.stackstr {mustBeTextScalar} = "MipIdif_build_aif"
+            end
+
+            assert(contains(this.pet_dyn.filepath, "derivatives"))
+            assert(~contains(this.pet_dyn.filepath, "sourcedata"))
+            ff = fullfile( ...
+                this.pet_dyn.filepath, ...
+                sprintf("%s_%s", this.pet_dyn.fileprefix, opts.stackstr));
+            if contains(ff, "*")
+                ff = mglob(ff);
+                assert(~isempty(ff))
+                if numel(ff) > 1
+                    warning("mlaif:RuntimeWarning", stackstr()+" returned string array of length "+numel(ff))
+                end
+            end
+        end
+        function g = fqfileprefix(this, varargin)
+            g = this.fqfp(varargin{:});
         end
         function [ic] = pet_static_on_anatomy(this)
             ic = this.pet_avgt_on_tof;
         end
         function pet_dyn_on_anatomy(~)
             error("mlaif:NotImplementedError", "MipIdif");
+        end
+        function idif_ic = save_imaging_context(this, idif, opts)
+            %% adjusts fileprefix and json_metadata prior to saving
+
+            arguments
+                this mlaif.MipIdif
+                idif mlfourd.ImagingContext2
+                opts.filepath = this.pet_dyn.filepath
+                opts.fileprefix_template = this.pet_dyn.fileprefix
+                opts.json_metadata_template = this.pet_dyn.json_metadata
+            end
+
+            idif_ic = mlfourd.ImagingContext2(idif);
+            idif_ic.filepath = opts.filepath;
+
+            % adjust fileprefix from template
+            fp = opts.fileprefix_template;
+            re = regexp(fp, "\S+(?<proc>proc-\S+)$", "names"); % includes "_pet"
+            idif_ic.fileprefix = strrep(fp, re.proc, "proc-MipIdif_idif");
+
+            % adjust json_metadata from template
+            j = opts.json_metadata_template;
+            idif_ic.json_metadata = j;
+            idif_ic.selectNiftiTool();
+            idif_ic.save();
+            this.product_ = idif_ic;
         end
         function [aife,aifl] = splice_early_to_late(this, earlyobj, lateobj, len_late, trc, ident)
             arguments
@@ -699,14 +749,6 @@ classdef MipIdif < handle & mlsystem.IHandle
             %%  See also web(fullfile(docroot, 'matlab/ref/matlab.mixin.copyable-class.html'))
             
             that = copyElement@matlab.mixin.Copyable(this);
-        end
-        function idif_ic = save_idif(this, aif)
-            idif_ic = mlfourd.ImagingContext2(aif);
-            idif_ic.filepath = this.pet_dyn.filepath;
-            idif_ic.fileprefix = sprintf("%s_%s", this.pet_dyn.fileprefix, stackstr(3));
-            idif_ic.json_metadata = this.pet_dyn.json_metadata;
-            idif_ic.save();
-            this.product_ = idif_ic;
         end
     end
     

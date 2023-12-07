@@ -19,6 +19,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         tof_on_pet
         tof_on_pet_flirt
         tof_on_t1w
+        tracer
         weights_timesMid
     end
 
@@ -44,6 +45,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         function g = get.halflife(this)
             rn = this.tracer_kit_.make_radionuclides();
             g = rn.halflife;
+            assert(isfinite(g))
         end
         function g = get.pet_avgt(this)
             if ~isempty(this.pet_avgt_)
@@ -172,6 +174,16 @@ classdef MipIdif < handle & mlsystem.IHandle
             med = this.bids_kit_.make_bids_med();
             g = med.tof_on_t1w_ic;
         end
+        function g = get.tracer(this)
+            if ~isempty(this.tracer_)
+                g = this.tracer_;
+                return
+            end
+
+            med = this.bids_kit_.make_bids_med();
+            g = med.tracer;
+            this.tracer_ = g;
+        end
         function g = get.weights_timesMid(this)
             if ~isempty(this.weights_timesMid_)
                 g = this.weights_timesMid_;
@@ -179,10 +191,19 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
 
             j = this.pet_dyn.json_metadata;
-            timesMid = asrow(j.timesMid);
-            weights = exp(-timesMid/20);
-            this.weights_timesMid_ = weights/trapz(timesMid, weights); % normalize to unit AUC
-            g = this.weights_timesMid_;
+            timesMid = j.timesMid;
+            timesMid = mlpipeline.ImagingMediator.ensureNumericTimesMid(timesMid);
+            timesMid = asrow(timesMid);
+            try
+                weights = exp(-timesMid/this.halflife);
+                weights(~isfinite(weights)) = 0;
+                this.weights_timesMid_ = weights/sum(weights); % normalize to unit AUC
+                g = this.weights_timesMid_;
+                assert(all(isfinite(g)))
+            catch ME
+                handwarning(ME)
+                g = ones(size(timesMid));
+            end
         end
     end
 
@@ -630,6 +651,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         tof_
         tof_on_pet_
         tof_on_pet_flirt_
+        tracer_
         weights_timesMid_
 
         bids_kit_

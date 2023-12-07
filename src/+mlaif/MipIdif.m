@@ -390,7 +390,20 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             %this.arterial_centerline_ = [];
             %this.arterial_input_function_ = [];
-        end        
+        end    
+        function idif_ic = build_deconv(this, idif_ic)
+            arguments 
+                this mlaif.MipIdif
+                idif_ic mlfourd.ImagingContext2
+            end
+
+            % deconvBayes
+            boxcar = mlsiemens.BoxcarModel.create(artery=idif_ic, tracer=this.tracer); 
+            boxcar.build_solution();
+            idif_ic = boxcar.artery;
+            idif_ic.fileprefix = idif_ic.fileprefix+"_"+stackstr();
+            idif_ic.save();
+        end
         function build_pet_objects(this)
             %% Build PET mips for use as guides when calling build_tof_mips.
             %  Also build transformations for registering centerlines to native PET.

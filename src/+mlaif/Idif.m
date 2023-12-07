@@ -26,7 +26,7 @@ classdef Idif < handle & mlsystem.IHandle
 
             try
                 dt = this.json_.starts(2) - this.json_.starts(1);
-                timesF = cumsum(this.json_.taus);
+                timesF = this.json_.timesMid(end);
                 this.timeInterpolants_ = 0:dt:timesF(end);
                 g = this.timeInterpolants_;
             catch ME

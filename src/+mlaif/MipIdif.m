@@ -302,7 +302,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             %tr_mipt.view(opts.cl, tof__)
 
             % parse tracobj for tags
-            re = regexp(tr.fileprefix, "(?<sub>sub-\S+)_(?<ses>ses-\d+)_trc-(?<trc>\S+)_proc-(?<proc>\S+)", "names");
+            re = mlpipeline.Bids.regexp_fileprefix(tr);
             assert(~isempty(re))
             if strcmp(re.trc, "co") || strcmp(re.trc, "oc")
                 opts.mipt_thr = min(50000, opts.mipt_thr);
@@ -376,7 +376,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                 this.back_project();
             end
             if opts.steps(4)
-                idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet);
+                idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet); % by statistical sampling
             else
                 idif_ic = mlfourd.ImagingContext2(this.fqfp + ".nii.gz");
             end
@@ -401,7 +401,8 @@ classdef MipIdif < handle & mlsystem.IHandle
             boxcar = mlsiemens.BoxcarModel.create(artery=idif_ic, tracer=this.tracer); 
             boxcar.build_solution();
             idif_ic = boxcar.artery;
-            idif_ic.fileprefix = idif_ic.fileprefix+"_"+stackstr();
+            idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix(idif_ic.fileprefix, ...
+                post_proc="deconv", remove_substring="_finite");
             idif_ic.save();
         end
         function build_pet_objects(this)
@@ -558,9 +559,9 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             assert(contains(this.pet_dyn.filepath, "derivatives"))
             assert(~contains(this.pet_dyn.filepath, "sourcedata"))
-            ff = fullfile( ...
-                this.pet_dyn.filepath, ...
-                sprintf("%s_%s", this.pet_dyn.fileprefix, opts.stackstr));
+            fp = mlpipeline.Bids.adjust_fileprefix(this.pet_dyn.fileprefix, ...                
+                new_proc="MipIdif", new_mode="idif", remove_substring="_timeAppend-4");
+            ff = fullfile(this.pet_dyn.filepath, fp);
             if contains(ff, "*")
                 ff = mglob(ff);
                 assert(~isempty(ff))
@@ -594,8 +595,8 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             % adjust fileprefix from template
             fp = opts.fileprefix_template;
-            re = regexp(fp, "\S+(?<proc>proc-\S+)$", "names"); % includes "_pet"
-            idif_ic.fileprefix = strrep(fp, re.proc, "proc-MipIdif_idif");
+            idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix(fp, ...                
+                new_proc="MipIdif", new_mode="idif", remove_substring="_timeAppend-4");
 
             % adjust json_metadata from template
             j = opts.json_metadata_template;

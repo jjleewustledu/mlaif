@@ -364,27 +364,30 @@ classdef MipIdif < handle & mlsystem.IHandle
             arguments
                 this mlaif.MipIdif
                 opts.steps logical = true(1, 5)
+                opts.delete_large_files logical = true;
             end
 
-            if opts.steps(1)
-                this.build_pet_objects();
-            end
-            if opts.steps(2)
-                this.build_tof_mips();
-            end
-            if opts.steps(3)
-                this.back_project();
+            if ~isfile(this.centerline_on_pet.fqfn)
+                if opts.steps(1)
+                    this.build_pet_objects(); % lots of fsl ops
+                end
+                if opts.steps(2)
+                    this.build_tof_mips(); % manual drawing
+                end
+                if opts.steps(3)
+                    this.back_project();
+                end
             end
             if opts.steps(4)
                 idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet); % by statistical sampling
             else
                 idif_ic = mlfourd.ImagingContext2(this.fqfp + ".nii.gz");
             end
-            if opts.steps(5)
+            if opts.steps(5) && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
                 idif_ic = this.build_deconv(idif_ic);
             end
 
-            if ~contains(this.pet_dyn.filepath, "sourcedata")
+            if opts.delete_large_files && ~contains(this.pet_dyn.filepath, "sourcedata")
                 deleteExisting(this.pet_dyn.fqfp+".*")
             end
 
@@ -682,6 +685,7 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             pet_dyn.relocateToDerivativesFolder();
             if ~isfile(pet_dyn)
+                pet_dyn.ensureSingle;
                 save(pet_dyn);
             end
             this.pet_dyn_fqfn_ = pet_dyn.fqfn;

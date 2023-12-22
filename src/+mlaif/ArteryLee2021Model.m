@@ -473,7 +473,7 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                 otherwise
             end
 
-            if isfield(Data, "t0_forced")
+            if isfield(Data, "t0_forced") && ~isempty(Data.t0_forced)
                 t0_forced = Data.t0_forced;
                 map('k5') = struct('min', t0_forced-1, 'max', t0_forced+1, 'init', t0_forced, 'sigma', 0.05); % t0 in sec
             end

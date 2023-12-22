@@ -108,11 +108,18 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             % update idealized artery
             pr_ = solved_star.product;
             [~,~,ideal] = this.sampled(pr_.ks, this.Data, [], solved_star.TimesSampled);
-            img_new_ = solved_star.M0*ideal;
+            img_new_ = solved_star.rescaleModelEstimate(ideal);
             ai_new_ = copy(this.artery.selectImagingTool(img=img_new_));
             ai_new_.fileprefix = strrep(this.artery.fileprefix, "_pet", "_arterylee");
             this.artery_ = ai_new_;  
-            solved_star.ArteryInterpolated = this.interp1_artery(img=img_new_);            
+            solved_star.ArteryInterpolated = this.interp1_artery(img=img_new_);    
+
+            % product_ := ks
+            ks_mat_= [asrow(pr_.ks), pr_.loss];
+            ks_mat_ = single(ks_mat_);
+            soln = this.artery.selectImagingTool(img=ks_mat_);
+            soln.fileprefix = strrep(this.artery.fileprefix, "_pet", "_arteryleeks");
+            this.product_ = soln;        
 
             % plot idealized artery
             h = solved_star.plot( ...
@@ -123,13 +130,6 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             saveFigure2(h, ...
                 this.artery.fqfp + "_" + stackstr(), ...
                 closeFigure=this.closeFigures);
-
-            % product_ := ks
-            ks_mat_= [asrow(pr_.ks), pr_.loss];
-            ks_mat_ = single(ks_mat_);
-            soln = this.artery.selectImagingTool(img=ks_mat_);
-            soln.fileprefix = strrep(this.artery.fileprefix, "_pet", "_arteryleeks");
-            this.product_ = soln;
         end	
         function [k,sk] = k1(this, varargin)
             [k,sk] = k1(this.solver_, varargin{:});

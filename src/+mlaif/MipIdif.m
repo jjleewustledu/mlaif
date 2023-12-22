@@ -367,6 +367,12 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.delete_large_files logical = true;
             end
 
+            % cached on filesystem
+            if isfile(this.new_fqfp + ".nii.gz")
+                idif_ic = mlfourd.ImagingContext2(this.new_fqfp + ".nii.gz");
+                return
+            end
+
             if ~isfile(this.centerline_on_pet.fqfn)
                 if opts.steps(1)
                     this.build_pet_objects(); % lots of fsl ops
@@ -380,8 +386,6 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
             if opts.steps(4)
                 idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet); % by statistical sampling
-            else
-                idif_ic = mlfourd.ImagingContext2(this.fqfp + ".nii.gz");
             end
             if opts.steps(5) && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
                 idif_ic = this.build_deconv(idif_ic);
@@ -407,6 +411,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix(idif_ic.fileprefix, ...
                 post_proc="deconv", remove_substring="_finite");
             idif_ic.save();
+            %figure; plot(idif_ic)
         end
         function build_pet_objects(this)
             %% Build PET mips for use as guides when calling build_tof_mips.
@@ -552,18 +557,18 @@ classdef MipIdif < handle & mlsystem.IHandle
             cl_flirt.interp = "nearestneighbour";
             cl_flirt.applyXfm();
         end        
-        function ff = fqfp(this, opts)
+        function ff = new_fqfp(this, opts)
             %% seeks out pertinent fqfp in derivatives, not sourcedata
 
             arguments
                 this mlaif.MipIdif
-                opts.stackstr {mustBeTextScalar} = "MipIdif_build_aif"
+                opts.remove_substring {mustBeTextScalar} = "_timeAppend-4"
             end
 
             assert(contains(this.pet_dyn.filepath, "derivatives"))
             assert(~contains(this.pet_dyn.filepath, "sourcedata"))
             fp = mlpipeline.Bids.adjust_fileprefix(this.pet_dyn.fileprefix, ...                
-                new_proc="MipIdif", new_mode="idif", remove_substring="_timeAppend-4");
+                new_proc="MipIdif-finite-deconv", new_mode="idif", remove_substring=opts.remove_substring);
             ff = fullfile(this.pet_dyn.filepath, fp);
             if contains(ff, "*")
                 ff = mglob(ff);
@@ -573,8 +578,8 @@ classdef MipIdif < handle & mlsystem.IHandle
                 end
             end
         end
-        function g = fqfileprefix(this, varargin)
-            g = this.fqfp(varargin{:});
+        function g = new_fqfileprefix(this, varargin)
+            g = this.new_fqfp(varargin{:});
         end
         function [ic] = pet_static_on_anatomy(this)
             ic = this.pet_avgt_on_tof;

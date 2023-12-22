@@ -174,6 +174,12 @@ classdef Fung2013 < handle & mlsystem.IHandle
             this.k_ = ipr.k;
             this.t_ = ipr.t;
 
+            % cached on filesystem
+            if isfile(this.fqfp + ".nii.gz")
+                idif_ic = mlfourd.ImagingContext2(this.fqfp + ".nii.gz");
+                return
+            end
+
             % do arterial segmentation
             this.arterial_segmentation_ = mlaif.ArterialSegmentation( ...
                 'fung2013', this, ...
@@ -249,6 +255,16 @@ classdef Fung2013 < handle & mlsystem.IHandle
             assert(isscalar(idx))
             sz = size(this.anatomy);
             c(idx) = sz(idx) - c(idx) + 1;           
+        end
+        function ff = fqfp(this, opts)
+            arguments
+                this mlaif.Fung2013
+                opts.stackstr {mustBeTextScalar} = "mlaif_Fung2013_sample_input_function1"
+                opts.suffix {mustBeTextScalar} = this.arterial_input_function_.suffix
+            end
+
+            fp = opts.stackstr + opts.suffix;
+            ff = fullfile(this.pet_dyn.filepath, fp);       
         end
         function [ic,f] = pet_static_on_anatomy(this, pet)
             [ic,f] = this.arterial_anatomy_.pet_static_on_anatomy(pet);

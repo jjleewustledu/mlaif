@@ -73,15 +73,13 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                 this.solver_ = mlpet.ArterySimulAnneal(context=this);
             end
             if contains(opts.solver_tags, "multinest")
-                this.solver_ = mlpet.ArteryMultiNest(context=this);
-            end
-            if contains(opts.solver_tags, "skilling-nest")
-                this.solver_ = mlpet.ArteryNest(context=this);
+                this.solver_ = mlnest.MultiNest(context=this);
             end
         end
         function soln = build_solution(this)
             %% MAKE_SOLUTION
             %  @return ks_ in R^1 as mlfourd.ImagingContext2, without saving to filesystems.   
+            %  @return this.artery, which is deconvolved.
 
             % this.Data is assigned in create(), since build_solution() requires no adjustments of this.Data
 
@@ -107,12 +105,13 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
 
             % update idealized artery
             pr_ = solved_star.product;
-            [~,~,ideal] = this.sampled(pr_.ks, this.Data, [], solved_star.TimesSampled);
-            img_new_ = solved_star.rescaleModelEstimate(ideal);
+            [~,A,ideal] = this.sampled(pr_.ks, this.Data, [], solved_star.TimesSampled);
+            img_new_ = solved_star.rescaleModelEstimate(A*ideal);
             ai_new_ = copy(this.artery.selectImagingTool(img=img_new_));
             ai_new_.fileprefix = strrep(this.artery.fileprefix, "_pet", "_arterylee");
             this.artery_ = ai_new_;  
-            solved_star.ArteryInterpolated = this.interp1_artery(img=img_new_);    
+            solved_star.ArteryInterpolated = this.interp1_artery(img=img_new_);   
+            this.solver_ = solved_star; 
 
             % product_ := ks
             ks_mat_= [asrow(pr_.ks), pr_.loss];
@@ -205,11 +204,11 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
         function this = create(opts)
             arguments
                 opts.artery mlfourd.ImagingContext2
+                opts.closeFigures logical = false
                 opts.model_kind {mustBeTextScalar} = "3bolus"
+                opts.Nensemble double = 1
                 opts.t0_forced {mustBeNumeric} = []
                 opts.tracer {mustBeTextScalar} = "Unknown"
-                opts.closeFigures logical = true
-                opts.Nensemble double = 20
             end
 
             this = mlaif.ArteryLee2021Model();
@@ -236,12 +235,13 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             import mlaif.ArteryLee2021Model.sampled
             import mlaif.ArteryLee2021Model.decay_corrected
             
-            estimation = sampled(ks, Data, [], times_sampled); 
+            estimation = sampled(ks, Data, [], times_sampled); % \in [0 1] 
+            estimation = estimation/max(estimation);
             measurement_norm = measurement/max(measurement); % \in [0 1] 
             positive = measurement_norm > 0.01;
             eoverm = estimation(positive)./measurement_norm(positive);
             
-            estimation_dc = decay_corrected(estimation_norm, Data, 0);
+            estimation_dc = decay_corrected(estimation, Data.tracer, 0);
             estimation_dc_norm = estimation_dc/max(estimation_dc); % \in [0 1]  
             measurement_dc = decay_corrected(measurement, Data, 0);
             measurement_dc_norm = measurement_dc/max(measurement_dc); % \in [0 1]             
@@ -255,10 +255,10 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             m('k2')  = struct('min',  0.05,  'max',   0.15, 'init',  0.05, 'sigma', 0.05); % beta in 1/sec
             m('k3')  = struct('min',  0.25,  'max',   3,    'init',  1,    'sigma', 0.05); % p
             m('k4')  = struct('min', -1,     'max',   0,    'init', -0.5,  'sigma', 0.05); % dp2 for last bolus; p2 = p1 + dp2
-            m('k5')  = struct('min',  0,     'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec
+            m('k5')  = struct('min',  5,     'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec
             m('k6')  = struct('min',  0,     'max',   0.2,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
-            m('k7')  = struct('min',  0.3,   'max',   0.7,  'init',  0.3,  'sigma', 0.05); % 2nd bolus fraction
-            m('k8')  = struct('min',  0,     'max',  20,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
+            m('k7')  = struct('min',  0.2,   'max',   0.8,  'init',  0.3,  'sigma', 0.05); % 2nd bolus fraction
+            m('k8')  = struct('min',  5,     'max',  20,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
             m('k9')  = struct('min',  0.2,   'max',   0.4,  'init',  0.3,  'sigma', 0.05); % recirc fraction 
             m('k10') = struct('min',  0,     'max',  20,    'init', 10,    'sigma', 0.05); % recirc delay 
             m('k11') = struct('min',  1,     'max',   2,    'init',  1.3,  'sigma', 0.05); % amplitude 
@@ -328,7 +328,9 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                 qs = slide(qs, t, t0 - t(1));
             end
             assert(all(imag(qs) == 0))
-            qs = qs .* 2.^(-t/halflife(tracer));
+            % if ~isempty(tracer)
+            %     qs = qs .* 2.^(-t/halflife(tracer));
+            % end
             qs = qs/max(qs); % \in [0 1] 
         end
         function qs = solution_2bolus(ks, N, tracer, p)
@@ -346,17 +348,21 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             if (t(1) >= t0) 
                 t_ = t - t0;
                 k_ = t_.^a .* exp(-(b*t_).^p);
+                k_ = k_/max(k_); % else overwhelmed by ss_
                 ss_ = 1 - exp(-g*t_);
                 qs = (1 - ss_frac)*k_ + ss_frac*ss_;
             else % k is complex for t - t0 < 0
                 t_ = t - t(1);
                 k_ = t_.^a .* exp(-(b*t_).^p);
+                k_ = k_/max(k_); % else overwhelmed by ss_
                 ss_ = 1 - exp(-g*t_);
                 qs = (1 - ss_frac)*k_ + ss_frac*ss_;
                 qs = slide(qs, t, t0 - t(1));
             end
             assert(all(imag(qs) == 0))
-            qs = qs .* 2.^(-t/halflife(tracer));
+            % if ~isempty(tracer)
+            %     qs = qs .* 2.^(-t/halflife(tracer));
+            % end
             qs = qs/max(qs); % \in [0 1] 
         end
         function qs = solution_3bolus(ks, N, tracer)
@@ -370,7 +376,7 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             recirc_delay = ks(10);
             
             qs1 = solution_2bolus(ks, N, tracer, ks(3));
-            qs_recirc = solution_1bolus(ks, N, tracer, max(0, ks(3) + ks(4)));
+            qs_recirc = solution_1bolus(ks, N, tracer, ks(3) + ks(4));
             qs_recirc = slide(qs_recirc, 0:N-1, recirc_delay);
             qs = (1 - recirc_frac)*qs1 + recirc_frac*qs_recirc;
             qs = qs/max(qs); % \in [0 1] 
@@ -379,25 +385,20 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             %% 2x stretched gamma distribution + recirc stretched gamma distribution + rising steadystate; 
             %  forcing p2 = p - dp2 < p, to be more dispersive
 
-            import mlaif.ArteryLee2021Model.solution_1bolus
             import mlaif.ArteryLee2021Model.solution_2bolus
             import mlaif.ArteryLee2021Model.slide
+            p1 = ks(3);
+            p2 = ks(3) + ks(4);
             bolus2_frac = ks(7);
             bolus2_delay = ks(8);
-            recirc_frac = ks(9);
-            recirc_delay = ks(10);
             
-            qs1 = solution_2bolus(ks, N, tracer, ks(3));
-            qs2 = solution_2bolus(ks, N, tracer, ks(3));
+            qs1 = solution_2bolus(ks, N, tracer, p1);
+            qs1 = qs1/max(qs1);
+            qs2 = solution_2bolus(ks, N, tracer, p2);
             qs2 = slide(qs2, 0:N-1, bolus2_delay);
-            qs_recirc = solution_1bolus(ks, N, tracer, min(0, ks(3) + ks(4)));
-            qs_recirc = slide(qs_recirc, 0:N-1, recirc_delay);
+            qs2 = qs2/max(qs2);     
 
-            a1 = (1 - recirc_frac)*(1 - bolus2_frac);
-            a2 = (1 - recirc_frac)*bolus2_frac;
-            a_recirc = recirc_frac;
-
-            qs = a1*qs1 + a2*qs2 + a_recirc*qs_recirc;
+            qs = (1 - bolus2_frac)*qs1 + bolus2_frac*qs2;
             qs = qs/max(qs); % \in [0 1] 
         end
         
@@ -461,14 +462,21 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                     map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
 
                     map('k6') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
-                    map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
-                    map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay in sec
+                    map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus fraction
+                    map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
+                    map('k9') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction 
+                    map('k10') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay 
+                    map('k12') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % g for steady-state accumulation 
                 case '2bolus'
                     map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
 
-                    map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
-                    map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay in sec
+                    map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus fraction
+                    map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
+                    map('k9') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction 
+                    map('k10') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay 
                 case '3bolus'
+                    map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus fraction
+                    map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
                 case '4bolus'
                 otherwise
             end
@@ -504,7 +512,7 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                     % allow double inhalation
 
                     map('k1')  = struct('min',  2,     'max',  10,    'init',  0.05, 'sigma', 0.05); % alpha
-                    map('k2')  = struct('min',  1,     'max',   5,    'init',  0.05, 'sigma', 0.05); % beta
+                    map('k2')  = struct('min',  0.8,   'max',   2,    'init',  0.05, 'sigma', 0.05); % beta
                     map('k3')  = struct('min',  1,     'max',   3,    'init',  0.5,  'sigma', 0.05); % p
                 otherwise
                     % noninformative
@@ -536,6 +544,12 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
 
         %% UTILITIES
 
+        function adjustMapForTracer(this)
+            this.map = mlaif.ArteryLee2021Model.static_adjustMapForTracer(this.map, this.Data);
+        end
+        function adjustMapForModelKind(this)
+            this.map = mlaif.ArteryLee2021Model.static_adjustMapForModelKind(this.map, this.Data);
+        end
         function img_int = interp1_artery(this, opts)
             arguments
                 this mlaif.ArteryLee2021Model

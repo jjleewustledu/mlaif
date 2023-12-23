@@ -8,6 +8,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         centerline_on_pet
         centerline_source
         halflife
+        model_kind
         pet_avgt % w/ decay-correction, weighted by taus
         pet_avgt_on_tof
         pet_dyn % read from filesystem to minimize copies of objects in memory, relocated from sourcedata -> derivatives
@@ -46,6 +47,9 @@ classdef MipIdif < handle & mlsystem.IHandle
             rn = this.tracer_kit_.make_radionuclides();
             g = rn.halflife;
             assert(isfinite(g))
+        end
+        function g = get.model_kind(this)
+            g = this.model_kind_;
         end
         function g = get.pet_avgt(this)
             if ~isempty(this.pet_avgt_)
@@ -343,22 +347,23 @@ classdef MipIdif < handle & mlsystem.IHandle
             idif_ic = this.save_imaging_context(mlfourd.ImagingContext2(tr_single__));
 
             % pcshow
+            h = figure;
             hold("on")
             toshow = tr_mipt.thresh(opts.mipt_thr); toshow.pcshow()
             opts.cl.pcshow()
             hold("off")
-            saveFigure2(gcf, fullfile(tr.filepath, ...
+            saveFigure2(h, fullfile(tr.filepath, ...
                 sprintf("pcshow_%s_%s_trc-%s_proc-tof-mips.fig", re.sub, re.ses, re.trc)))
 
             % plot
-            h = figure;
+            h1 = figure;
             timesMid = idif_ic.json_metadata.timesMid; % previously made numeric
             plot(asrow(timesMid), asrow(idif_ic.imagingFormat.img), ':o')
             fontsize(scale=1.3)
             xlabel("times (s)")
             ylabel("IDIF activity density (Bq/mL)")
             title(sprintf("IDIF by MIPs, %s_%s_trc-%s", re.sub, re.ses, re.trc), Interpreter="none")
-            savefig(h, strcat(idif_ic.fileprefix, ".fig"))
+            savefig(h1, strcat(idif_ic.fileprefix, ".fig"))
         end
         function idif_ic = build_all(this, opts)
             arguments
@@ -405,11 +410,16 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
 
             % deconvBayes
-            boxcar = mlsiemens.BoxcarModel.create(artery=idif_ic, tracer=this.tracer); 
+            boxcar = mlsiemens.BoxcarModel.create( ...
+                artery=idif_ic, ...
+                tracer=this.tracer, ...
+                model_kind=this.model_kind); 
             boxcar.build_solution();
             idif_ic = boxcar.artery;
-            idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix(idif_ic.fileprefix, ...
-                post_proc="deconv", remove_substring="_finite");
+            idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix( ...
+                idif_ic.fileprefix, ...
+                post_proc="deconv", ...
+                remove_substring="_finite");
             idif_ic.save();
             %figure; plot(idif_ic)
         end
@@ -677,6 +687,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.scanner_kit mlkinetics.ScannerKit
                 opts.pet_avgt = []
                 opts.pet_mipt = []
+                opts.model_kind = "3bolus"
             end
 
             this = mlaif.MipIdif();
@@ -701,6 +712,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             if ~isempty(opts.pet_mipt)
                 this.pet_mipt_ = mlfourd.ImagingContext2(opts.pet_mipt);
             end
+            this.model_kind_ = opts.model_kind;
         end   
         function fn = json(obj)
             if isa(obj, 'mlfourd.ImagingContext2')
@@ -734,6 +746,7 @@ classdef MipIdif < handle & mlsystem.IHandle
 
     properties (Access = protected)
         centerline_on_pet_
+        model_kind_
         pet_avgt_
         pet_avgt_on_tof_
         pet_dyn_fqfn_

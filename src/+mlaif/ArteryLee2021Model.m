@@ -385,16 +385,14 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             %% 2x stretched gamma distribution + recirc stretched gamma distribution + rising steadystate; 
             %  forcing p2 = p - dp2 < p, to be more dispersive
 
-            import mlaif.ArteryLee2021Model.solution_2bolus
+            import mlaif.ArteryLee2021Model.solution_3bolus
             import mlaif.ArteryLee2021Model.slide
-            p1 = ks(3);
-            p2 = ks(3) + ks(4);
             bolus2_frac = ks(7);
             bolus2_delay = ks(8);
             
-            qs1 = solution_2bolus(ks, N, tracer, p1);
+            qs1 = solution_3bolus(ks, N, tracer);
             qs1 = qs1/max(qs1);
-            qs2 = solution_2bolus(ks, N, tracer, p2);
+            qs2 = solution_3bolus(ks, N, tracer);
             qs2 = slide(qs2, 0:N-1, bolus2_delay);
             qs2 = qs2/max(qs2);     
 

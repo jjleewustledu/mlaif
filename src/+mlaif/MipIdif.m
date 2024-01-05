@@ -42,6 +42,16 @@ classdef MipIdif < handle & mlsystem.IHandle
             g = rn.halflife;
             assert(isfinite(g))
         end
+        function g = get.json_metadata_template(this)
+            if ~isempty(this.json_metadata_template_)
+                g = this.json_metadata_template_;
+                return
+            end
+
+            j = this.pet_dyn.json_metadata;
+            this.json_metadata_template_ = mlpipeline.ImagingMediator.ensureNumericTimingData(j);
+            g = this.json_metadata_template_;
+        end
         function g = get.model_kind(this)
             g = this.model_kind_;
         end
@@ -366,7 +376,10 @@ classdef MipIdif < handle & mlsystem.IHandle
                 end
             end
             if opts.steps(4)
-                idif_ic = this.build_aif(this.pet_dyn, this.tof_on_pet); % by statistical sampling
+                this.pet_dyn_fqfn_ = mlkinetics.BidsKit.timeAppendForFqfn( ...
+                    this.pet_dyn_fqfn_, ...
+                    do_save=false);
+                idif_ic = this.build_aif(this.pet_dyn); % by statistical sampling
             end
             if opts.steps(5) && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
                 idif_ic = this.build_deconv(idif_ic);
@@ -589,6 +602,7 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             % adjust json_metadata from template
             j = opts.json_metadata_template;
+            j = mlpipeline.ImagingMediator.ensureNumericTimingData(j);
             idif_ic.json_metadata = j;
             idif_ic.selectNiftiTool();
             idif_ic.save();
@@ -709,6 +723,16 @@ classdef MipIdif < handle & mlsystem.IHandle
             ic = mlfourd.ImagingContext2(obj);
             fn = strcat(ic.fqfp, '.nii.gz');
         end
+        function ic = timeAppend(ic)
+            toglob = strrep(ic, "-delay0-", "-delay*-");
+            mg = mglob(toglob);
+            if 1 == length(mg)
+                return
+            else
+                fprintf("%s: (%s).timeAppend(%s)\n", stackstr(3), ic.fileprefix, mg(2))
+                ic = ic.timeAppend(mg(2));
+            end
+        end
         function viewAnat()
         end
     end
@@ -717,6 +741,8 @@ classdef MipIdif < handle & mlsystem.IHandle
 
     properties (Access = protected)
         centerline_on_pet_
+        json_metadata_template_
+        mediator_
         model_kind_
         pet_avgt_
         pet_dyn_fqfn_

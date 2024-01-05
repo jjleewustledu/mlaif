@@ -354,7 +354,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             arguments
                 this mlaif.MipIdif
                 opts.steps logical = true(1, 5)
-                opts.delete_large_files logical = true;
+                opts.delete_large_files logical = false;
             end
 
             % cached on filesystem
@@ -371,7 +371,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                     this.build_tof_mips(); % manual drawing
                 end
                 if opts.steps(3)
-                    this.back_project();
+                    this.back_project(); % overwrites centerline_on_pet.nii.gz
                 end
             end
             if opts.steps(4)
@@ -523,7 +523,7 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             % flirt
             cl = this.centerline_on_pet;
-            source = this.centerline_source;
+            source = this.pet_avgt;
             source_on_target = mlfourd.ImagingContext2( ...
                 source.fqfp+"_on_"+target_trc+".nii.gz");
             cl_flirt = mlfsl.Flirt( ...
@@ -715,6 +715,13 @@ classdef MipIdif < handle & mlsystem.IHandle
                 this.pet_mipt_ = mlfourd.ImagingContext2(opts.pet_mipt);
             end
             this.model_kind_ = opts.model_kind;
+            if isemptytext(opts.model_kind)
+                if strcmpi(this.tracer, "OO")
+                    this.model_kind_ = "4bolus";
+                else
+                    this.model_kind_ = "3bolus";
+                end
+            end
         end   
         function fn = json(obj)
             if isa(obj, 'mlfourd.ImagingContext2')
@@ -784,6 +791,19 @@ classdef MipIdif < handle & mlsystem.IHandle
             %%  See also web(fullfile(docroot, 'matlab/ref/matlab.mixin.copyable-class.html'))
             
             that = copyElement@matlab.mixin.Copyable(this);
+            if ~isempty(this.pet_avgt_)
+                that.pet_avgt_ = copy(this.pet_avgt_); end
+            if ~isempty(this.pet_mipt_)
+                that.pet_mipt_ = copy(this.pet_mipt_); end
+            if ~isempty(this.tof_on_pet_)
+                that.tof_on_pet_ = copy(this.tof_on_pet_); end
+
+            if ~isempty(this.bids_kit_)
+                that.bids_ = copy(this.bids_kit_); end            
+            if ~isempty(this.tracer_kit_)
+                that.bids_ = copy(this.tracer_kit_); end
+            if ~isempty(this.scanner_kit_)
+                that.bids_ = copy(this.scanner_kit_); end
         end
     end
     

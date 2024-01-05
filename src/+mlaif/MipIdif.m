@@ -360,18 +360,49 @@ classdef MipIdif < handle & mlsystem.IHandle
                 idif_ic mlfourd.ImagingContext2
             end
 
+            pwd0 = pushd(idif_ic.filepath);
+
+            boxcar = mlnest.Boxcar.create(artery=idif_ic, model_kind=this.model_kind);
+            obj = mlnest.MultiNest(context=boxcar);
+            obj.filepath = idif_ic.filepath;
+            obj = obj.solve( ...
+                signal_model=@boxcar.signalmodel, ...
+                verbose=false, ...
+                Nlive=55, ...
+                Nmcmc=0); 
+
+            disp(obj)
+            fprintf("Multinest.product: \n"); 
+            disp(obj.product)
+            fprintf("ks(): %g\n", obj.ks())
+            fprintf("loss: %s\n", obj.loss())
+            obj.plot_posteriors(singles=true, do_save=true);
+            obj.saveall();
+
+            [sig,idl] = obj.simulate();
+
+            figure;
+            plot_over_figure(boxcar.artery, 'o', MarkerSize=12); hold on;
+            plot_over_figure(sig, '--', LineWidth=2);
+            plot_over_figure(idl, '-', LineWidth=1.5); hold off;
+            ylabel("activity (Bq/mL)")
+            xlabel("time (s)")
+            saveFigures(pwd, prefix=stackstr(use_dashes=true), closeFigure=true)
+
+            popd(pwd0);
+
             % deconvBayes
-            boxcar = mlsiemens.BoxcarModel.create( ...
-                artery=idif_ic, ...
-                tracer=this.tracer, ...
-                model_kind=this.model_kind); 
-            boxcar.build_solution();
-            idif_ic = boxcar.artery;
-            idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix( ...
-                idif_ic.fileprefix, ...
-                post_proc="deconv", ...
-                remove_substring="_finite");
-            idif_ic.save();
+            % boxcar = mlsiemens.BoxcarModel.create( ...
+            %     artery=idif_ic, ...
+            %     tracer=this.tracer, ...
+            %     model_kind=this.model_kind); 
+            % boxcar.build_solution();
+            % idif_ic = boxcar.artery;
+            % idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix( ...
+            %     idif_ic.fileprefix, ...
+            %     post_proc="deconv", ...
+            %     remove_substring="_finite");
+            % idif_ic.save();
             %figure; plot(idif_ic)
         end
         function build_pet_objects(this)

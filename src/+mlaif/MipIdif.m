@@ -180,71 +180,57 @@ classdef MipIdif < handle & mlsystem.IHandle
         function cl = back_project(this)
             %% back-project MIPs            
             
-            pwd1 = pushd(this.pet_dyn.filepath);
+            pwd1 = pushd(this.pet_avgt.filepath);
 
             % read_avw <- $FSLDIR/etc/matlab
-            cxL_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_xl.nii.gz"));
-            cxR_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_xr.nii.gz"));
-            cyL_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_yl.nii.gz"));
-            cyR_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_yr.nii.gz"));
-            czL_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_zl.nii.gz"));
-            czR_img = read_avw(fullfile(this.pet_dyn.filepath, "centerline_zr.nii.gz"));
+            cxL_img = read_avw(fullfile(this.pet_avgt.filepath, "centerline_xl.nii.gz"));
+            cxR_img = read_avw(fullfile(this.pet_avgt.filepath, "centerline_xr.nii.gz"));
+            cyL_img = read_avw(fullfile(this.pet_avgt.filepath, "centerline_yl.nii.gz"));
+            cyR_img = read_avw(fullfile(this.pet_avgt.filepath, "centerline_yr.nii.gz"));
+            czL_img = read_avw(fullfile(this.pet_avgt.filepath, "centerline_zl.nii.gz"));
+            czR_img = read_avw(fullfile(this.pet_avgt.filepath, "centerline_zr.nii.gz"));
             
-            size_tof = size(this.tof);
-            img1 = zeros(size_tof);
-            img2 = zeros(size_tof);
-            img3 = zeros(size_tof);
-            img4 = zeros(size_tof);
-            img5 = zeros(size_tof);
-            img6 = zeros(size_tof);
+            size_pet_avgt = size(this.pet_avgt);
+            img1 = zeros(size_pet_avgt);
+            img2 = zeros(size_pet_avgt);
+            img3 = zeros(size_pet_avgt);
+            img4 = zeros(size_pet_avgt);
+            img5 = zeros(size_pet_avgt);
+            img6 = zeros(size_pet_avgt);
             
-            for ix = 1:size_tof(1)
+            for ix = 1:size_pet_avgt(1)
                 img1(ix,:,:) = cxL_img; end
-            for iy = 1:size_tof(2)
+            for iy = 1:size_pet_avgt(2)
                 img2(:,iy,:) = cyL_img; end
-            for iz = 1:size_tof(3)
+            for iz = 1:size_pet_avgt(3)
                 img3(:,:,iz) = czL_img; end
-            for ix = 1:size_tof(1)
+            for ix = 1:size_pet_avgt(1)
                 img4(ix,:,:) = cxR_img; end
-            for iy = 1:size_tof(2)
+            for iy = 1:size_pet_avgt(2)
                 img5(:,iy,:) = cyR_img; end
-            for iz = 1:size_tof(3)
+            for iz = 1:size_pet_avgt(3)
                 img6(:,:,iz) = czR_img; end
             
-            img1 = imdilate(img1, strel("sphere", 1));
-            img2 = imdilate(img2, strel("sphere", 1));
-            img3 = imdilate(img3, strel("sphere", 1));
-            img4 = imdilate(img4, strel("sphere", 1));
-            img5 = imdilate(img5, strel("sphere", 1));
-            img6 = imdilate(img6, strel("sphere", 1));
+            % img1 = imdilate(img1, strel("sphere", 1));
+            % img2 = imdilate(img2, strel("sphere", 1));
+            % img3 = imdilate(img3, strel("sphere", 1));
+            % img4 = imdilate(img4, strel("sphere", 1));
+            % img5 = imdilate(img5, strel("sphere", 1));
+            % img6 = imdilate(img6, strel("sphere", 1));
             
             imgL = img1 & img2 & img3;
             imgR = img4 & img5 & img6;
             
-            %tof1 = this.tof.thresh(150).binarized();
-            cl = copy(this.tof); 
+            cl = copy(this.pet_avgt); 
             cl = cl.nifti;
             cl.img = imgL + imgR;
-            cl.fileprefix = 'centerline_on_tof';
             cl = mlfourd.ImagingContext2(cl);
-            cl.save()
+            cl = cl.binarized();
             %cl.pcshow()  
-
-            % transform centerline from tof native to pet native
-            this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
-                fullfile(this.pet_dyn.filepath, "centerline_on_pet.nii.gz"));
-            cl_on_pet_flirt = copy(this.tof_on_pet_flirt);
-            cl_on_pet_flirt.in = cl;
-            cl_on_pet_flirt.out = this.centerline_on_pet_;
-            cl_on_pet_flirt.interp = 'trilinear';
-            cl_on_pet_flirt.applyXfm;
-            assert(isfile(this.centerline_on_pet_.fqfn))   
-            this.centerline_on_pet_.selectImagingTool();
-            thr = dipmax(this.centerline_on_pet_)/10;
-            this.centerline_on_pet_ = this.centerline_on_pet_.thresh(thr);
-            this.centerline_on_pet_ = this.centerline_on_pet_.binarized();
-            this.centerline_on_pet_.fileprefix = "centerline_on_pet";
-            this.centerline_on_pet_.save();
+            cl.filepath = this.new_filepath;
+            cl.fileprefix = 'centerline_on_pet';
+            cl.save()
+            this.centerline_on_pet_ = cl;
 
             popd(pwd1);
         end

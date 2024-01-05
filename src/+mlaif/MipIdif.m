@@ -446,26 +446,33 @@ classdef MipIdif < handle & mlsystem.IHandle
         end
         function build_tof_mips(this)
             
-            pet_miptx = max(this.pet_mipt_on_tof, [], 1);
-            pet_mipty = max(this.pet_mipt_on_tof, [], 2);
-            pet_miptz = max(this.pet_mipt_on_tof, [], 3);
+            pet_miptx = max(this.pet_mipt, [], 1);
+            pet_mipty = max(this.pet_mipt, [], 2);
+            pet_miptz = max(this.pet_mipt, [], 3);
+
+            pet_miptx.save();
+            pet_mipty.save();
+            pet_miptz.save();
 
             %% draw in fsleyes 2-3 voxel widths for barycentric continuity
 
-            pwd0 = pushd(this.pet_dyn.filepath);
+            pwd0 = pushd(this.pet_avgt.filepath);
 
             fprintf("Please draw arterial centerlines as overlaid images on the tof\n" + ...
                 "Save files: centerline_zl and centerline_zr.\n\n");
-            tof_mipz = max(this.tof, [], 3); 
-            tof_mipz.view(pet_miptz) % pet_miptz.view(tof_mipz)
+            tof_mipz = max(this.tof_on_pet, [], 3); 
+            tof_mipz.save()
+            %tof_mipz.view(pet_miptz) % pet_miptz.view(tof_mipz)
             fprintf("Please draw arterial centerlines as overlaid images on the tof\n" + ...
                 "Save files: centerline_yl and centerline_yr.\n\n");
-            tof_mipy = max(this.tof, [], 2); 
-            tof_mipy.view(pet_mipty) % pet_mipty.view(tof_mipy)
+            tof_mipy = max(this.tof_on_pet, [], 2); 
+            tof_mipy.save()
+            %tof_mipy.view(pet_mipty) % pet_mipty.view(tof_mipy)
             fprintf("Please draw arterial centerlines as overlaid images on the tof\n" + ...
                 "Save files: centerline_xl and centerline_xr.\n\n");
-            tof_mipx = max(this.tof, [], 1); 
-            tof_mipx.view(pet_miptx) % pet_miptx.view(tof_mipx)
+            tof_mipx = max(this.tof_on_pet, [], 1); 
+            tof_mipx.save()
+            %tof_mipx.view(pet_miptx) % pet_miptx.view(tof_mipx)
 
             popd(pwd0);
         end

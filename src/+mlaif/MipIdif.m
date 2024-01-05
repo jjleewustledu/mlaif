@@ -666,30 +666,37 @@ classdef MipIdif < handle & mlsystem.IHandle
 
     methods (Static)
         function this = create(opts)
+            %% bids_kit has file in sourceSesPet
+
              arguments
                 opts.bids_kit mlkinetics.BidsKit
                 opts.tracer_kit mlkinetics.TracerKit
                 opts.scanner_kit mlkinetics.ScannerKit
                 opts.pet_avgt = []
                 opts.pet_mipt = []
-                opts.model_kind = "3bolus"
+                opts.model_kind = ""
             end
 
             this = mlaif.MipIdif();
             this.bids_kit_ = opts.bids_kit;
             this.tracer_kit_ = opts.tracer_kit;
             this.scanner_kit_ = opts.scanner_kit;
-            pet_dyn = this.scanner_kit_.do_make_activity_density(); % decayCorrected=true
-            med = this.bids_kit_.make_bids_med();
-            this.t1w_ = med.t1w_ic;
-            this.tof_ = med.tof_ic;
+            
+            this.mediator_ = this.bids_kit_.make_bids_med();
+            this.t1w_ = this.mediator_.t1w_ic;
+            this.tof_ = this.mediator_.tof_ic;
 
-            pet_dyn.relocateToDerivativesFolder();
-            if ~isfile(pet_dyn)
-                pet_dyn.ensureSingle;
-                save(pet_dyn);
-            end
-            this.pet_dyn_fqfn_ = pet_dyn.fqfn;
+            % pet_dyn:
+            % defer to filesystem this expensive object;
+            % avoid storing in memory because large size will force
+            % ImagingContext2 to return handles rather than safe copies
+            assert(isfile(this.mediator_.fqfn))
+            assert(contains(this.mediator_.filepath, this.mediator_.sourceSesPath))
+            this.pet_dyn_fqfn_ = this.mediator_.fqfn;
+
+            % tof_on_pet:  
+            % defer to filesystem this expensive object
+            this.tof_on_pet_fqfn_ = fullfile(this.pet_avgt.filepath, "tof_on_"+this.pet_avgt.fileprefix+".nii.gz"); 
 
             if ~isempty(opts.pet_avgt)
                 this.pet_avgt_ = mlfourd.ImagingContext2(opts.pet_avgt);

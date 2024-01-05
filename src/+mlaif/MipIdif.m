@@ -4,6 +4,10 @@ classdef MipIdif < handle & mlsystem.IHandle
     %  Created 12-Jun-2023 22:59:36 by jjlee in repository /Users/jjlee/MATLAB-Drive/mlaif/src/+mlaif.
     %  Developed on Matlab 9.14.0.2254940 (R2023a) Update 2 for MACI64.  Copyright 2023 John J. Lee.
     
+    properties (Constant)
+        max_len_mipt = 30
+    end
+    
     properties (Dependent)
         centerline_on_pet
         halflife
@@ -94,19 +98,18 @@ classdef MipIdif < handle & mlsystem.IHandle
                 return
             end
 
-            ifc = this.pet_dyn.imagingFormat;
-            weights = this.weights_timesMid;
-            for t = 1:size(ifc, 4)
-                ifc.img(:,:,:,t) = ifc.img(:,:,:,t)*weights(t);
-            end
+            ifc = this.pet_dyn.imagingFormat;   
+            L = min(size(ifc, 4), this.max_len_mipt);
+            ifc.img = ifc.img(:,:,:,1:L);
+            % weights = this.weights_timesMid(1:L); % negligible differences
+            % for t = 1:L
+            %     ifc.img(:,:,:,t) = ifc.img(:,:,:,t)*weights(t);
+            % end
 
             ic = mlfourd.ImagingContext2(ifc);
             this.pet_mipt_ = max(ic, [], 4);
             this.pet_mipt_.fileprefix = sprintf("%s_mipt", this.pet_dyn.fileprefix);
             this.pet_mipt_.relocateToDerivativesFolder();
-            save(this.pet_mipt_);
-            g = this.pet_mipt_;
-        end
             if ~isfile(this.pet_mipt)
                 save(this.pet_mipt_);
             end

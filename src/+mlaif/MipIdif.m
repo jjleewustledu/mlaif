@@ -234,39 +234,53 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             popd(pwd1);
         end
-        function idif_ic = build_aif(this, petobj, tofobj, opts)
+        function idif_ic = build_aif(this, petobj, opts)
             arguments
                 this mlaif.MipIdif
                 petobj
-                tofobj
                 opts.cl = this.centerline_on_pet
                 opts.mipt_thr double = 180000
                 opts.frac_select double = 0.05
+                opts.do_view logical = false
             end
-
-            % e.g., !ls *tof*T1w*.nii.gz -> 'sub-108293_ses-20210218092914_tof_fl3d_tra_p2_multi-slab_orient-std_on_T1w.nii.gz'
-            %tof__ = mlfourd.ImagingContext2(tofobj);
-
-            % e.g., !ls *trc-oc*.nii.gz -> 'sub-108293_ses-20210421144815_trc-oc_proc-dyn_pet_on_T1w.nii.gz'
+            
+            % adjust opts.mipt_thr for CO
             tr = mlfourd.ImagingContext2(petobj);
-            tr_single = single(tr);
-            sz = size(tr_single);
-            [tr_mipt,tr_indices] = max(tr, [], 4);
-            cache.tr_mipt = tr_mipt;
-            cache.tr_indices = tr_indices;
-            %tr_mipt.view(opts.cl, tof__)
-
-            % parse tracobj for tags
             re = mlpipeline.Bids.regexp_fileprefix(tr);
             assert(~isempty(re))
             if strcmp(re.trc, "co") || strcmp(re.trc, "oc")
                 opts.mipt_thr = min(50000, opts.mipt_thr);
             end
 
-            % select 0.05*numel of brightest and earliest-arriving voxels from centerline        
+            %% select 0.05*numel of brightest and earliest-arriving voxels from centerline        
+
             centerline = logical(opts.cl);
             cache.centerline = centerline;
 
+            % tr_mipt, tr_indices ~ MIP, time of max
+            tr_single = single(tr);
+            sz = size(tr_single);
+            [tr_mipt,tr_indices] = max(tr, [], 4);
+            tr_mipt.save();
+            tr_indices.save();
+            cache.tr_mipt = tr_mipt;
+            cache.tr_indices = tr_indices;
+            if opts.do_view
+                tr_mipt.view();
+                tr_indices.view();
+            end
+
+            % vec containing values of brightest 
+            brightest = single(tr_mipt);
+            brightest = brightest(centerline);
+            cache.brightest = brightest;
+
+            % vec containing index of earliest peaks
+            earliest = single(tr_indices);
+            earliest = earliest(centerline);
+            cache.earliest = earliest;
+
+            % tr_single__ ~ time-series selected from centerline
             tr_single__ = zeros(dipsum(centerline), sz(4));
             for t = 1:sz(4)
                 vol_ = tr_single(:,:,:,t);
@@ -274,47 +288,58 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
             cache.tr_single__ = tr_single__;
 
-            brightest = single(tr_mipt);
-            brightest = brightest(centerline);
-            cache.brightest = brightest;
-
-            earliest = single(tr_indices);
-            earliest = earliest(centerline);
-            cache.earliest = earliest;
-
+            % sort brightest, earliest
             len = length(earliest);
             T = table(ascol(1:len), ascol(brightest), ascol(earliest), variableNames=["indices", "brightest", "earliest"]);
             T = sortrows(T, [2, 3], {'descend', 'ascend'});
             cache.T = T;
             T1 = T(ascol(1:round(opts.frac_select*len)), :);
-            tr_single__ = tr_single__(T1.indices,:);
-            tr_single__ = mean(tr_single__, 1);
+            cache.T1 = T1;
+            tr_single___ = tr_single__(T1.indices,:);
+            cache.tr_single___ = tr_single___;
 
             % save cache
-            cache_fqfn = sprintf("%s_%s_cache.mat", this.pet_dyn.fqfp, stackstr());
+            cache_fqfn = sprintf("%s_%s_cache.mat", this.new_fqfp, stackstr());
             save(cache_fqfn, "cache");
             
             % aif from volume-average of brightest 0.05 from centerline
-            idif_ic = this.save_imaging_context(mlfourd.ImagingContext2(tr_single__));
+            idif_ic = this.save_imaging_context(mlfourd.ImagingContext2(mean(tr_single___, 1)));
 
-            % pcshow
-            h = figure;
-            hold("on")
-            toshow = tr_mipt.thresh(opts.mipt_thr); toshow.pcshow()
-            opts.cl.pcshow()
-            hold("off")
-            saveFigure2(h, fullfile(tr.filepath, ...
-                sprintf("pcshow_%s_%s_trc-%s_proc-tof-mips.fig", re.sub, re.ses, re.trc)))
+            if opts.do_view
+                h = figure;
+                timesMid = this.json_metadata_template.timesMid;
+                for pidx = 1:size(T1, 1)
+                    plot(asrow(timesMid), asrow(tr_single___(pidx, :)));
+                end
+                atitle = stackstr(use_dashes=true)+"-brightest-earliest";
+                title(atitle)
+                xlabel("times (s)")
+                ylabel("activity (Bq/mL)")
+                saveFigure2(h, ...
+                    fullfile(opts.cl.filepath, atitle), ...
+                    closeFigure=false);
+            end
 
-            % plot
-            h1 = figure;
-            timesMid = idif_ic.json_metadata.timesMid; % previously made numeric
-            plot(asrow(timesMid), asrow(idif_ic.imagingFormat.img), ':o')
-            fontsize(scale=1.3)
-            xlabel("times (s)")
-            ylabel("IDIF activity density (Bq/mL)")
-            title(sprintf("IDIF by MIPs, %s_%s_trc-%s", re.sub, re.ses, re.trc), Interpreter="none")
-            savefig(h1, strcat(idif_ic.fileprefix, ".fig"))
+            if opts.do_view
+                % pcshow
+                h = figure;
+                hold("on")
+                toshow = tr_mipt.thresh(opts.mipt_thr); toshow.pcshow()
+                opts.cl.pcshow()
+                hold("off")
+                saveFigure2(h, fullfile(tr.filepath, ...
+                    sprintf("pcshow_%s_%s_trc-%s_proc-%s.fig", re.sub, re.ses, re.trc, stackstr(use_dashes=true))))
+
+                % plot
+                h1 = figure;
+                timesMid = idif_ic.json_metadata.timesMid; % previously made numeric
+                plot(asrow(timesMid), asrow(idif_ic.imagingFormat.img), ':o')
+                %fontsize(scale=1.3)
+                xlabel("times (s)")
+                ylabel("IDIF activity density (Bq/mL)")
+                title(sprintf("IDIF by MIPs, %s_%s_trc-%s", re.sub, re.ses, re.trc), Interpreter="none")
+                savefig(h1, strcat(idif_ic.fileprefix, ".fig"))
+            end
         end
         function idif_ic = build_all(this, opts)
             arguments

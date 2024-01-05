@@ -159,8 +159,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                 return
             end
 
-            med = this.bids_kit_.make_bids_med();
-            g = med.tracer;
+            g = this.mediator_.tracer;
             this.tracer_ = g;
         end
         function g = get.weights_timesMid(this)
@@ -550,8 +549,23 @@ classdef MipIdif < handle & mlsystem.IHandle
             cl_flirt.out = out_ic;
             cl_flirt.interp = "nearestneighbour";
             cl_flirt.applyXfm();
-        end        
-        function ff = new_fqfp(this, opts)
+        end
+        function ic = make_volume(this, img, opts)
+            arguments
+                this mlaif.MipIdif %#ok<INUSA>
+                img {mustBeNumeric}
+                opts.ic_template mlfourd.ImagingContext2 = this.pet_avgt
+                opts.fileprefix {mustBeTextScalar} = stackstr(3)
+            end
+            ifc = opts.ic_template.nifti;
+            ifc.img = img;
+            ifc.fileprefix = opts.fileprefix;
+            ic = mlfourd.ImagingContext2(ifc);
+        end  
+        function g = new_filepath(this)
+            g = myfileparts(this.new_fqfp);
+        end
+        function fqfp = new_fqfp(this, opts)
             %% seeks out pertinent fqfp in derivatives, not sourcedata
 
             arguments
@@ -559,24 +573,20 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.remove_substring {mustBeTextScalar} = "_timeAppend-4"
             end
 
-            assert(contains(this.pet_dyn.filepath, "derivatives"))
-            assert(~contains(this.pet_dyn.filepath, "sourcedata"))
-            fp = mlpipeline.Bids.adjust_fileprefix(this.pet_dyn.fileprefix, ...                
+            pth = fullfile(this.mediator_.derivSesPath, "pet");
+            fp = mlpipeline.Bids.adjust_fileprefix(this.pet_avgt.fileprefix, ...                
                 new_proc="MipIdif-finite-deconv", new_mode="idif", remove_substring=opts.remove_substring);
-            ff = fullfile(this.pet_dyn.filepath, fp);
-            if contains(ff, "*")
-                ff = mglob(ff);
-                assert(~isempty(ff))
-                if numel(ff) > 1
-                    warning("mlaif:RuntimeWarning", stackstr()+" returned string array of length "+numel(ff))
+            fqfp = fullfile(pth, fp);
+            if contains(fqfp, "*")
+                fqfp = mglob(fqfp);
+                assert(~isempty(fqfp))
+                if numel(fqfp) > 1
+                    warning("mlaif:RuntimeWarning", stackstr()+" returned string array of length "+numel(fqfp))
                 end
             end
         end
         function g = new_fqfileprefix(this, varargin)
             g = this.new_fqfp(varargin{:});
-        end
-        function [ic] = pet_static_on_anatomy(this)
-            ic = this.pet_avgt_on_tof;
         end
         function pet_dyn_on_anatomy(~)
             error("mlaif:NotImplementedError", "MipIdif");
@@ -587,8 +597,8 @@ classdef MipIdif < handle & mlsystem.IHandle
             arguments
                 this mlaif.MipIdif
                 idif mlfourd.ImagingContext2
-                opts.filepath = this.pet_dyn.filepath
-                opts.fileprefix_template = this.pet_dyn.fileprefix
+                opts.filepath = this.pet_avgt.filepath
+                opts.fileprefix_template = this.pet_avgt.fileprefix
                 opts.json_metadata_template = this.pet_dyn.json_metadata
             end
 
@@ -638,7 +648,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             
             early = mlfourd.ImagingContext2(early);
             aife = early.volumeAveraged(cl);
-            aife.fileprefix = sprintf("aif_trc-%s_proc-tof-mips-early", trc);
+            aife.fileprefix = sprintf("aif_trc-%s_proc-%s", trc, stackstr(use_dashes=true));
             aife.save
             tause = [10*ones(1,146) 60*ones(1,10) 300*ones(1,9)]; % 1:146 interleaved with dt = 2 sec
             timesMide = nan(1,165);
@@ -652,7 +662,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             
             late = mlfourd.ImagingContext2(late);
             aifl = late.volumeAveraged(cl);
-            aifl.fileprefix = sprintf("aif_trc-%s_proc-tof-mips-late", trc);
+            aifl.fileprefix = sprintf("aif_trc-%s_proc-%se", trc, stackstr(use_dashes=true));
             aifl.save
             tausl = [5*ones(1,24) 20*ones(1,9) 60*ones(1,10) 300*ones(1,9)];
             timesMidl = cumsum(tausl) - tausl/2;

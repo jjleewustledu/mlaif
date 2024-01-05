@@ -6,19 +6,16 @@ classdef MipIdif < handle & mlsystem.IHandle
     
     properties (Dependent)
         centerline_on_pet
-        centerline_source
         halflife
+        json_metadata_template
         model_kind
         pet_avgt % w/ decay-correction, weighted by taus
-        pet_avgt_on_tof
         pet_dyn % read from filesystem to minimize copies of objects in memory, relocated from sourcedata -> derivatives
         pet_mipt % w/ decay-correction
-        pet_mipt_on_tof
         product
         t1w
         tof
         tof_on_pet
-        tof_on_pet_flirt
         tof_on_t1w
         tracer
         weights_timesMid
@@ -29,19 +26,12 @@ classdef MipIdif < handle & mlsystem.IHandle
             if isempty(this.centerline_on_pet_)
                 try
                     this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
-                        fullfile(this.pet_dyn.filepath, "centerline_on_pet.nii.gz"));
+                        fullfile(this.pet_avgt.filepath, "centerline_on_pet.nii.gz"));
                 catch ME
                     handexcept(ME)
                 end
             end
             g = copy(this.centerline_on_pet_);
-        end
-        function g = get.centerline_source(this)
-            globbed = glob( ...
-                convertStringsToChars( ...
-                fullfile(this.centerline_on_pet.filepath, "sub-*_ses-*_trc-*Static.nii.gz")));
-            assert(~isempty(globbed), stackstr())
-            g = mlfourd.ImagingContext2(globbed{1});
         end
         function g = get.halflife(this)
             rn = this.tracer_kit_.make_radionuclides();
@@ -57,42 +47,38 @@ classdef MipIdif < handle & mlsystem.IHandle
                 return
             end
 
-            fqfn = strrep(this.pet_dyn.fqfp, "createNiftiMovingAvgFrames", "createNiftiStatic");
-            if isfile(fqfn)
-                this.pet_avgt_ = mlfourd.ImagingContext2(fqfn);
+            % prefer static
+            pth = fullfile(this.mediator_.sourceSesPath, "pet");
+            mg = mglob(fullfile(pth, "sub-*_ses-*delay*BrainMoCo2*createNiftiStatic.nii.gz"));
+            if ~isemptytext(mg) && isfile(mg(1))
+                % pick delay0
+                this.pet_avgt_ = mlfourd.ImagingContext2(mg(1));
+                this.pet_avgt_.relocateToDerivativesFolder();
                 g = this.pet_avgt_;
                 return
             end
 
+            % look for _avgt
             fqfn = this.pet_dyn.fqfp+"_avgt.nii.gz";
             if isfile(fqfn)
                 this.pet_avgt_ = mlfourd.ImagingContext2(fqfn);
+                this.pet_avgt_.relocateToDerivativesFolder();
                 g = this.pet_avgt_;
                 return
             end
 
-            this.pet_avgt_ = this.pet_dyn.timeAveraged(weights=this.weights_timesMid);
+            % construct _avgt
+            this.pet_avgt_ = this.pet_dyn.timeAveraged(weights=this.pet_dyn.taus);
             this.pet_avgt_.relocateToDerivativesFolder();
-            save(this.pet_avgt_);
+            if ~isfile(this.pet_avgt_)
+                save(this.pet_avgt_);
+            end
             g = this.pet_avgt_;
         end
-        function g = get.pet_avgt_on_tof(this)
-            if ~isempty(this.pet_avgt_on_tof_)
-                g = this.pet_avgt_on_tof_;
-                return
-            end
-
-            fqfn = this.pet_avgt.fqfp+"_on_tof.nii.gz";
-            if isfile(fqfn)
-                this.pet_avgt_on_tof_ = mlfourd.ImagingContext2(fqfn);
-                g = this.pet_avgt_on_tof_;
-                return
-            end
-
-            this.build_pet_objects();
-            g = this.pet_avgt_on_tof_;
-        end
         function g = get.pet_dyn(this)
+            %% pet_dyn will commonly be too large for in-memory copying; 
+            %  therefor, always instantiate as FilesystemTools in ImagingContext2.  
+
             g = mlfourd.ImagingContext2(this.pet_dyn_fqfn_);
         end
         function g = get.pet_mipt(this)
@@ -121,33 +107,20 @@ classdef MipIdif < handle & mlsystem.IHandle
             save(this.pet_mipt_);
             g = this.pet_mipt_;
         end
-        function g = get.pet_mipt_on_tof(this)
-            if ~isempty(this.pet_mipt_on_tof_)
-                g = this.pet_mipt_on_tof_;
-                return
+            if ~isfile(this.pet_mipt)
+                save(this.pet_mipt_);
             end
-
-            fqfn = this.pet_mipt.fqfp+"_on_tof.nii.gz";
-            if isfile(fqfn)
-                this.pet_mipt_on_tof_ = mlfourd.ImagingContext2(fqfn);
-                g = this.pet_mipt_on_tof_;
-                return
-            end
-
-            this.build_pet_objects();
-            g = this.pet_mipt_on_tof_;
+            g = this.pet_mipt_;
         end
         function g = get.product(this)
             assert(~isempty(this.product_))
             g = copy(this.product_);
         end
         function g = get.t1w(this)
-            med = this.bids_kit_.make_bids_med();
-            g = med.t1w_ic;
+            g = this.mediator_.t1w_ic;
         end
         function g = get.tof(this)
-            med = this.bids_kit_.make_bids_med();
-            g = med.tof_ic;
+            g = this.mediator_.tof_ic;
         end
         function g = get.tof_on_pet(this)
             if ~isempty(this.tof_on_pet_)
@@ -155,28 +128,17 @@ classdef MipIdif < handle & mlsystem.IHandle
                 return
             end
 
-            fn = this.tof.fileprefix+"_on_pet_avgt.nii.gz";
-            fqfn = fullfile(this.pet_dyn.filepath, fn);
-            if isfile(fqfn)
-                this.tof_on_pet_ = mlfourd.ImagingContext2(fqfn);
+            if isfile(this.tof_on_pet_fqfn_)
+                this.tof_on_pet_ = mlfourd.ImagingContext2(this.tof_on_pet_fqfn_);
                 g = this.tof_on_pet_;
                 return
             end
 
             this.build_pet_objects();
-            g = this.tof_on_pet_;
-        end
-        function g = get.tof_on_pet_flirt(this)
-            if ~isempty(this.tof_on_pet_flirt_)
-                g = this.tof_on_pet_flirt_;
-                return
-            end
-            this.build_pet_objects();
-            g = this.tof_on_pet_flirt_;
+            g = mlfourd.ImagingContext2(this.tof_on_pet_fqfn_);
         end
         function g = get.tof_on_t1w(this)
-            med = this.bids_kit_.make_bids_med();
-            g = med.tof_on_t1w_ic;
+            g = this.mediator_.tof_on_t1w_ic;
         end
         function g = get.tracer(this)
             if ~isempty(this.tracer_)
@@ -427,83 +389,40 @@ classdef MipIdif < handle & mlsystem.IHandle
             %% Build PET mips for use as guides when calling build_tof_mips.
             %  Also build transformations for registering centerlines to native PET.
 
-            %% Register PET avgt on T1w.
+            %% Register T1w on PET avgt.
 
-            pet_on_t1w_fqfn = sprintf("%s_on_T1w.nii.gz", this.pet_avgt.fqfp);
-            pet_on_t1w = mlfourd.ImagingContext2(pet_on_t1w_fqfn);
-            pet_on_t1w_flirt = mlfsl.Flirt( ...
-                'in', this.pet_avgt, ...
-                'ref', this.t1w, ...
-                'out', pet_on_t1w, ...
-                'omat', this.mat(pet_on_t1w), ...
-                'bins', 256, ...
-                'cost', 'mutualinfo', ...
-                'dof', 6, ...
-                'interp', 'spline', ...
-                'noclobber', false);
-            if ~isfile(pet_on_t1w.fqfn)
-                % do expensive coreg.
-                pet_on_t1w_flirt.flirt();
-            end
-            assert(isfile(pet_on_t1w.fqfn))
-
-            %% Register T1w on tof.
-
-            t1w_on_tof = mlfourd.ImagingContext2(this.t1w.fqfp+"_on_tof.nii.gz");
-            t1w_on_tof_flirt = mlfsl.Flirt( ...
+            t1w_on_pet_fqfn = fullfile(this.pet_avgt.filepath, "T1w_on_"+this.pet_avgt.fileprefix+".nii.gz"); 
+            t1w_on_pet = mlfourd.ImagingContext2(t1w_on_pet_fqfn);
+            t1w_on_pet_flirt = mlfsl.Flirt( ...
                 'in', this.t1w, ...
-                'ref', this.tof, ...
-                'out', t1w_on_tof, ...
-                'omat', this.mat(t1w_on_tof), ...
+                'ref', this.pet_avgt, ...
+                'out', t1w_on_pet, ...
+                'omat', this.mat(t1w_on_pet), ...
                 'bins', 256, ...
                 'cost', 'mutualinfo', ...
                 'dof', 6, ...
                 'interp', 'spline', ...
                 'noclobber', false);
-            if ~isfile(t1w_on_tof.fqfn)
+            if ~isfile(t1w_on_pet.fqfn)
                 % do expensive coreg.
-                t1w_on_tof_flirt.flirt();
+                t1w_on_pet_flirt.flirt();
             end
-            assert(isfile(t1w_on_tof.fqfn))
+            assert(isfile(t1w_on_pet.fqfn))
 
-            %% Transform PET avgt to tof.
+            %% Transform tof to PET avgt.
 
-            this.pet_avgt_on_tof_ = mlfourd.ImagingContext2(this.pet_avgt.fqfp+"_on_tof.nii.gz");
-            pet_avgt_on_tof_flirt = copy(pet_on_t1w_flirt);
-            pet_avgt_on_tof_flirt.concatXfm(BtoC=this.mat(t1w_on_tof));
-            pet_avgt_on_tof_flirt.in = this.pet_avgt;
-            pet_avgt_on_tof_flirt.ref = this.tof;
-            pet_avgt_on_tof_flirt.out = this.pet_avgt_on_tof_;
-            if ~isfile(this.pet_avgt_on_tof_.fqfn)
-                pet_avgt_on_tof_flirt.applyXfm();
+            this.tof_on_pet_ = mlfourd.ImagingContext2(this.tof_on_pet_fqfn_);
+            tof_on_pet_avgt_flirt = copy(t1w_on_pet_flirt);
+            tof_on_pet_avgt_flirt.concatXfm(AtoB=this.mat(this.tof_on_t1w));
+            tof_on_pet_avgt_flirt.in = this.tof;
+            tof_on_pet_avgt_flirt.ref = this.pet_avgt;
+            tof_on_pet_avgt_flirt.out = this.tof_on_pet_;
+            if ~isfile(this.tof_on_pet_.fqfn)
+                tof_on_pet_avgt_flirt.applyXfm();
             end
-            assert(isfile(this.pet_avgt_on_tof_.fqfn))
+            assert(isfile(this.tof_on_pet_.fqfn))
 
-            %% Transform PET mipt to tof.
-
-            this.pet_mipt_on_tof_ = mlfourd.ImagingContext2(this.pet_mipt.fqfp+"_on_tof.nii.gz");
-            pet_mipt_on_tof_flirt = copy(pet_avgt_on_tof_flirt);
-            pet_mipt_on_tof_flirt.in = this.pet_mipt;
-            pet_mipt_on_tof_flirt.out = this.pet_mipt_on_tof_;
-            if ~isfile(this.pet_mipt_on_tof_.fqfn)
-                pet_mipt_on_tof_flirt.applyXfm();
-            end
-            assert(isfile(this.pet_mipt_on_tof_.fqfn))
-
-            %% Transform tof to PET mipt.
-
-            fn = this.tof.fileprefix+"_on_pet_avgt.nii.gz";
-            fqfn = fullfile(this.pet_dyn.filepath, fn);
-            this.tof_on_pet_ = mlfourd.ImagingContext2(fqfn);
-            this.tof_on_pet_flirt_ = copy(pet_avgt_on_tof_flirt);
-            this.tof_on_pet_flirt_.invertXfm();
-            this.tof_on_pet_flirt_.in = this.tof;
-            this.tof_on_pet_flirt_.ref = this.pet_avgt;
-            this.tof_on_pet_flirt_.out = this.tof_on_pet_;
-            if ~isfile(this.tof_on_pet_) 
-                this.tof_on_pet_flirt_.applyXfm();
-            end
-            assert(isfile(this.tof_on_pet_.fqfn))            
+            this.pet_mipt; % saves
         end
         function build_tof_mips(this)
             
@@ -748,15 +667,13 @@ classdef MipIdif < handle & mlsystem.IHandle
         centerline_on_pet_
         model_kind_
         pet_avgt_
-        pet_avgt_on_tof_
         pet_dyn_fqfn_
         pet_mipt_
-        pet_mipt_on_tof_
         product_
         t1w_
         tof_
         tof_on_pet_
-        tof_on_pet_flirt_
+        tof_on_pet_fqfn_
         tracer_
         weights_timesMid_
 

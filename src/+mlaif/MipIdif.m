@@ -5,10 +5,17 @@ classdef MipIdif < handle & mlsystem.IHandle
     %  Developed on Matlab 9.14.0.2254940 (R2023a) Update 2 for MACI64.  Copyright 2023 John J. Lee.
     
     properties (Constant)
+        ALPHA = 0.1
         max_len_mipt = 30
+    end
+
+    properties
+        minz_for_mip
+        reference_tracer
     end
     
     properties (Dependent)
+        centerline_on_reftrc
         centerline_on_pet
         halflife
         json_metadata_template
@@ -17,6 +24,8 @@ classdef MipIdif < handle & mlsystem.IHandle
         pet_dyn % read from filesystem to minimize copies of objects in memory, relocated from sourcedata -> derivatives
         pet_mipt % w/ decay-correction
         product
+        reftrc_dyn
+        reftrc_avgt
         t1w
         tof
         tof_on_pet
@@ -26,6 +35,18 @@ classdef MipIdif < handle & mlsystem.IHandle
     end
 
     methods %% GET, SET
+        function g = get.centerline_on_reftrc(this)
+            if isempty(this.centerline_on_reftrc_)
+                try
+                    pth = this.reftrc_avgt.filepath;
+                    this.centerline_on_reftrc_ = mlfourd.ImagingContext2( ...
+                        fullfile(pth, "centerline_on_pet.nii.gz"));
+                catch ME
+                    handexcept(ME)
+                end
+            end
+            g = copy(this.centerline_on_reftrc_);
+        end
         function g = get.centerline_on_pet(this)
             if isempty(this.centerline_on_pet_)
                 try
@@ -110,7 +131,7 @@ classdef MipIdif < handle & mlsystem.IHandle
 
             ifc = this.pet_dyn.imagingFormat;   
             L = min(size(ifc, 4), this.max_len_mipt);
-            ifc.img = ifc.img(:,:,:,1:L);
+            ifc.img = ifc.img(:,:,this.minz_for_mip:end,1:L);
             % weights = this.weights_timesMid(1:L); % negligible differences
             % for t = 1:L
             %     ifc.img(:,:,:,t) = ifc.img(:,:,:,t)*weights(t);
@@ -120,7 +141,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             this.pet_mipt_ = max(ic, [], 4);
             this.pet_mipt_.fileprefix = sprintf("%s_mipt", this.pet_dyn.fileprefix);
             this.pet_mipt_.relocateToDerivativesFolder();
-            if ~isfile(this.pet_mipt)
+            if ~isfile(this.pet_mipt_)
                 save(this.pet_mipt_);
             end
             g = this.pet_mipt_;
@@ -128,6 +149,45 @@ classdef MipIdif < handle & mlsystem.IHandle
         function g = get.product(this)
             assert(~isempty(this.product_))
             g = copy(this.product_);
+        end
+        function g = get.reftrc_dyn(this)
+            if ~isempty(this.reftrc_dyn_)
+                g = this.reftrc_dyn_;
+                return
+            end
+
+            % dynamic
+            mg = mglob(fullfile(this.mediator_.sourceSubPath, "ses-*", "pet", "sub-*_ses-*_trc-"+this.reference_tracer+"_proc-delay*BrainMoCo2-createNiftiMovingAvgFrames.nii.gz"));
+            mg = natsort(mg); % human fdg always precedes phantom fdg; prefer delay0
+            if ~isemptytext(mg) && isfile(mg(1))
+                % pick delay0
+                this.reftrc_dyn_ = mlfourd.ImagingContext2(mg(1));
+                % avoid relocating large dynamic imaging to derivatives
+                % this.reftrc_avgt_.relocateToDerivativesFolder(); 
+                g = this.reftrc_dyn_;
+                return
+            end
+
+            error("mlaif:RunTimeError", stackstr())
+        end
+        function g = get.reftrc_avgt(this)
+            if ~isempty(this.reftrc_avgt_)
+                g = this.reftrc_avgt_;
+                return
+            end
+
+            % prefer static
+            mg = mglob(fullfile(this.mediator_.sourceSubPath, "ses-*", "pet", "sub-*_ses-*_trc-"+this.reference_tracer+"_proc-delay*BrainMoCo2-createNiftiStatic.nii.gz"));
+            mg = natsort(mg); % human fdg always precedes phantom fdg; prefer delay0
+            if ~isemptytext(mg) && isfile(mg(1))
+                % pick delay0
+                this.reftrc_avgt_ = mlfourd.ImagingContext2(mg(1));
+                this.reftrc_avgt_.relocateToDerivativesFolder();
+                g = this.reftrc_avgt_;
+                return
+            end
+
+            error("mlaif:RunTimeError", stackstr())
         end
         function g = get.t1w(this)
             g = this.mediator_.t1w_ic;
@@ -186,6 +246,100 @@ classdef MipIdif < handle & mlsystem.IHandle
     end
 
     methods
+        function cl = align_centerline_on_tracer(this, opts)
+            %% aligns FDG centerline on other tracers
+
+            arguments
+                this mlaif.MipIdif
+                opts.frames double = []
+            end
+
+            if contains(this.pet_dyn_fqfn_, "_trc-"+this.reference_tracer, IgnoreCase=true) % ho is in "/home"
+                cl = this.centerline_on_pet;
+                assert(isfile(cl));
+                return
+            end
+
+            % use early ref frames to align vasculature
+
+            if ~isempty(opts.frames)
+                reftrac_avgt__ = this.select_frames(this.reftrc_dyn, frames=opts.frames);
+            else
+                reftrac_avgt__ = this.reftrc_avgt;
+            end
+
+            % use dlicv masks
+
+            inweight = this.build_dlicv_mask(this.pet_avgt);
+            refweight = this.build_dlicv_mask(reftrac_avgt__);
+
+            pet_on_ref_fqfn = this.pet_avgt.fqfp+"_on_"+this.reference_tracer+".nii.gz"; 
+            pet_on_ref = mlfourd.ImagingContext2(pet_on_ref_fqfn);
+            pet_on_ref_flirt = mlfsl.Flirt( ...
+                'in', this.pet_avgt, ...
+                'inweight', inweight, ...
+                'ref', reftrac_avgt__, ...
+                'refweight', refweight, ...
+                'out', pet_on_ref, ...
+                'omat', this.mat(pet_on_ref), ...
+                'bins', 256, ...
+                'cost', 'mutualinfo', ...
+                'dof', 6, ...
+                'interp', 'spline', ...
+                'noclobber', false);
+            if ~isfile(pet_on_ref.fqfn)
+                % do expensive coreg.
+                pet_on_ref_flirt.flirt();
+            end
+            assert(isfile(pet_on_ref.fqfn))
+
+            pet_on_ref_flirt.invertXfm();
+
+            pet_on_ref_flirt.in = this.centerline_on_reftrc;
+            pet_on_ref_flirt.out = this.centerline_on_pet;
+            pet_on_ref_flirt.interp = "trilinear";
+            pet_on_ref_flirt.applyXfm();
+            copyfile(this.centerline_on_pet.fqfn, this.centerline_on_pet.fqfp+"_trilinear.nii.gz")
+            this.centerline_on_pet_ = this.centerline_on_pet.thresh(this.ALPHA);
+            this.centerline_on_pet_ = this.centerline_on_pet.binarized();
+            this.centerline_on_pet_.fileprefix = "centerline_on_pet";
+            this.centerline_on_pet_.save();
+            assert(isfile(this.centerline_on_pet))
+        end
+        function ic = build_dlicv_mask(this, pet_static)
+            arguments
+                this mlaif.MipIdif
+                pet_static {mustBeNonempty}
+            end
+            pet_static = mlfourd.ImagingContext2(pet_static);
+
+            t1w_on_pet_fqfn = fullfile(pet_static.filepath, "T1w_on_"+pet_static.filename); 
+            t1w_on_pet = mlfourd.ImagingContext2(t1w_on_pet_fqfn);
+            t1w_on_pet_flirt = mlfsl.Flirt( ...
+                'in', this.t1w, ...
+                'ref', pet_static, ...
+                'out', t1w_on_pet, ...
+                'omat', this.mat(t1w_on_pet), ...
+                'bins', 256, ...
+                'cost', 'mutualinfo', ...
+                'dof', 6, ...
+                'interp', 'spline', ...
+                'noclobber', false);
+            if ~isfile(t1w_on_pet.fqfn) || ~isfile(this.mat(t1w_on_pet))
+                % do expensive coreg.
+                t1w_on_pet_flirt.flirt();
+            end
+
+            ic_fqfn = pet_static.fqfp+"_dlicv.nii.gz";
+            ic = mlfourd.ImagingContext2(ic_fqfn);
+            if ~isfile(ic.fqfn)
+                t1w_on_pet_flirt.in = this.mediator_.dlicv_ic;
+                t1w_on_pet_flirt.out = ic;
+                t1w_on_pet_flirt.interp = "nearestneighbour";
+                t1w_on_pet_flirt.applyXfm();
+            end
+            assert(isfile(ic.fqfn))
+        end
         function cl = back_project(this)
             %% back-project MIPs            
             
@@ -249,7 +403,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                 petobj
                 opts.cl = this.centerline_on_pet
                 opts.mipt_thr double = 180000
-                opts.frac_select double = 0.05
+                opts.frac_select double = this.ALPHA
                 opts.do_view logical = false
             end
             
@@ -353,7 +507,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         function idif_ic = build_all(this, opts)
             arguments
                 this mlaif.MipIdif
-                opts.steps logical = true(1, 5)
+                opts.steps logical = true(1, 6)
                 opts.delete_large_files logical = false;
             end
 
@@ -363,24 +517,33 @@ classdef MipIdif < handle & mlsystem.IHandle
                 return
             end
 
+            idif_ic = [];
             if ~isfile(this.centerline_on_pet.fqfn)
                 if opts.steps(1)
                     this.build_pet_objects(); % lots of fsl ops
                 end
                 if opts.steps(2)
-                    this.build_tof_mips(); % manual drawing
+                    this.build_tof_mips(); % write intermediates needed for drawing on MIPs
                 end
                 if opts.steps(3)
                     this.back_project(); % overwrites centerline_on_pet.nii.gz
                 end
             end
             if opts.steps(4)
+                if contains(this.tracer, "co", IgnoreCase=true) || ...
+                        contains(this.tracer, "oc", IgnoreCase=true)
+                    this.align_centerline_on_tracer(frames=1:25);
+                else
+                    this.align_centerline_on_tracer();
+                end
+            end
+            if opts.steps(5)
                 this.pet_dyn_fqfn_ = mlkinetics.BidsKit.timeAppendForFqfn( ...
                     this.pet_dyn_fqfn_, ...
-                    do_save=false);
+                    do_save=true);
                 idif_ic = this.build_aif(this.pet_dyn); % by statistical sampling
             end
-            if opts.steps(5) && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
+            if opts.steps(6) % && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
                 idif_ic = this.build_deconv(idif_ic);
             end
 
@@ -618,6 +781,21 @@ classdef MipIdif < handle & mlsystem.IHandle
             idif_ic.save();
             this.product_ = idif_ic;
         end
+        function ic = select_frames(this, dyn_ic, opts)
+            arguments
+                this mlaif.MipIdif
+                dyn_ic mlfourd.ImagingContext2
+                opts.frames double {mustBePositive}
+            end
+            if isscalar(opts.frames)
+                opts.frames = 1:opts.frames;
+            end
+            ifc = dyn_ic.imagingFormat;
+            ifc.img = ifc.img(:,:,:,opts.frames);
+            ifc.img = mean(ifc.img, 4);
+            ifc.fileprefix = sprintf("%s_frames%i-%i", ifc.fileprefix, opts.frames(1), opts.frames(end));
+            ic = mlfourd.ImagingContext2(ifc);
+        end
         function [aife,aifl] = splice_early_to_late(this, earlyobj, lateobj, len_late, trc, ident)
             arguments
                 this mlaif.MipIdif
@@ -685,6 +863,8 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.pet_avgt = []
                 opts.pet_mipt = []
                 opts.model_kind = ""
+                opts.reference_tracer {mustBeTextScalar} = "fdg" % consider "ho"
+                opts.minz_for_mip = 10 % used to remove scattering from inferior FOV
             end
 
             this = mlaif.MipIdif();
@@ -722,6 +902,8 @@ classdef MipIdif < handle & mlsystem.IHandle
                     this.model_kind_ = "3bolus";
                 end
             end
+            this.reference_tracer = opts.reference_tracer;
+            this.minz_for_mip = opts.minz_for_mip;
         end   
         function fn = json(obj)
             if isa(obj, 'mlfourd.ImagingContext2')
@@ -764,6 +946,7 @@ classdef MipIdif < handle & mlsystem.IHandle
     %% PROTECTED
 
     properties (Access = protected)
+        centerline_on_reftrc_
         centerline_on_pet_
         json_metadata_template_
         mediator_
@@ -772,6 +955,8 @@ classdef MipIdif < handle & mlsystem.IHandle
         pet_dyn_fqfn_
         pet_mipt_
         product_
+        reftrc_dyn_
+        reftrc_avgt_
         t1w_
         tof_
         tof_on_pet_

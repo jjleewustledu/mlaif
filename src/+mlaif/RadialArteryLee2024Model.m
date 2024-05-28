@@ -255,6 +255,7 @@ classdef RadialArteryLee2024Model < handle & mlsystem.IHandle
         end
         function m = preferredMap()
             m = mlaif.ArteryLee2021Model.preferredMap;
+            m('k10') = struct('min',  0,     'max',  15,    'init', 10,    'sigma', 0.05); % recirc delay 
             m('k11') = struct('min',  0.5,   'max',   1,    'init',  0.95, 'sigma', 0.05); % amplitude fraction above baseline \approx 0.95
         end    
         function [qs,A_qs,qs_] = sampled(ks, Data, artery_interpolated, times_sampled)

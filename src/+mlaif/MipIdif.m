@@ -50,8 +50,15 @@ classdef MipIdif < handle & mlsystem.IHandle
         function g = get.centerline_on_pet(this)
             if isempty(this.centerline_on_pet_)
                 try
-                    this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
-                        fullfile(this.pet_avgt.filepath, "centerline_on_pet.nii.gz"));
+                    if this.dilate_m_ > 0
+                        this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
+                            fullfile(this.pet_avgt.filepath, ...
+                            sprintf("centerline_on_pet_dilate-m%i.nii.gz", this.dilate_m_)));
+                    else
+                        this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
+                            fullfile(this.pet_avgt.filepath, "centerline_on_pet.nii.gz"));
+                    end
+                    assert(isfile(this.centerline_on_pet_))
                 catch ME
                     handexcept(ME)
                 end
@@ -406,6 +413,12 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.frac_select double = this.ALPHA
                 opts.do_view logical = false
             end
+
+            cl_tags = split(opts.cl.fileprefix, "centerline_on_pet");
+            cl_tags = strrep(cl_tags(2), "_", "-");
+            sel_tags = sprintf("-select%g", opts.frac_select);
+            sel_tags = strrep(sel_tags, ".", "p");
+            tags = cl_tags + sel_tags;
             
             % adjust opts.mipt_thr for CO
             tr = mlfourd.ImagingContext2(petobj);
@@ -423,9 +436,13 @@ classdef MipIdif < handle & mlsystem.IHandle
             % tr_mipt, tr_indices ~ MIP, time of max
             tr_single = single(tr);
             sz = size(tr_single);
-            [tr_mipt,tr_indices] = max(tr, [], 4);
-            tr_mipt.save();
-            tr_indices.save();
+            [tr_mipt,tr_indices] = max(tr, [], 4); % ~ 45 sec for dyn CO with 200 frames
+            if ~isfile(tr_mipt)                    
+                tr_mipt.save();
+            end
+            if ~isfile(tr_indices)
+                tr_indices.save();
+            end
             cache.tr_mipt = tr_mipt;
             cache.tr_indices = tr_indices;
             if opts.do_view
@@ -456,17 +473,20 @@ classdef MipIdif < handle & mlsystem.IHandle
             T = table(ascol(1:len), ascol(brightest), ascol(earliest), variableNames=["indices", "brightest", "earliest"]);
             T = sortrows(T, [2, 3], {'descend', 'ascend'});
             cache.T = T;
-            T1 = T(ascol(1:round(opts.frac_select*len)), :);
+            len_selected = max(1, round(opts.frac_select*len));
+            T1 = T(ascol(1:len_selected), :);
             cache.T1 = T1;
             tr_single___ = tr_single__(T1.indices,:);
             cache.tr_single___ = tr_single___;
 
             % save cache
-            cache_fqfn = sprintf("%s_%s_cache.mat", this.new_fqfp, stackstr());
+            cache_fqfn = sprintf("%s_%s%s_cache.mat", this.new_fqfp, stackstr(), tags);
             save(cache_fqfn, "cache");
             
-            % aif from volume-average of brightest 0.05 from centerline
-            idif_ic = this.save_imaging_context(mlfourd.ImagingContext2(mean(tr_single___, 1)));
+            % aif from volume-average of brightest fraction from centerline ROI
+            idif_ic = this.save_imaging_context( ...
+                mlfourd.ImagingContext2(mean(tr_single___, 1)), ...
+                tags=tags);
 
             if opts.do_view
                 h = figure;
@@ -505,10 +525,22 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
         end
         function idif_ic = build_all(this, opts)
+            %% Args:
+            %  opts.delete_large_files logical = false
+            %  opts.steps logical = true(1, 6)
+            %
+            %       step(1) ~ calls build_pet_objects()
+            %       step(2) ~ calls build_tof_mips()
+            %       step(3) ~ calls back_project()
+            %       step(4) ~ calls align_centerline_on_tracer()
+            %       step(5) ~ calls build_aif(this.pet_dyn)
+            %       step(6) ~ calls build_deconv()
+
             arguments
                 this mlaif.MipIdif
                 opts.steps logical = true(1, 6)
-                opts.delete_large_files logical = false;
+                opts.delete_large_files logical = false
+                opts.frac_select double = this.ALPHA
             end
 
             % cached on filesystem
@@ -541,7 +573,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                 this.pet_dyn_fqfn_ = mlkinetics.BidsKit.timeAppendForFqfn( ...
                     this.pet_dyn_fqfn_, ...
                     do_save=true);
-                idif_ic = this.build_aif(this.pet_dyn); % by statistical sampling
+                idif_ic = this.build_aif(this.pet_dyn, frac_select=opts.frac_select); % by statistical sampling
             end
             if opts.steps(6) % && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
                 idif_ic = this.build_deconv(idif_ic);
@@ -763,6 +795,10 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.filepath = this.pet_avgt.filepath
                 opts.fileprefix_template = this.pet_avgt.fileprefix
                 opts.json_metadata_template = this.pet_dyn.json_metadata
+                opts.tags {mustBeTextScalar} = ""
+            end
+            if opts.tags ~= "" && ~strcmp(opts.tags{1}(1), "-")
+                opts.tags = "-"+opts.tags;
             end
 
             idif_ic = mlfourd.ImagingContext2(idif);
@@ -771,7 +807,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             % adjust fileprefix from template
             fp = opts.fileprefix_template;
             idif_ic.fileprefix = mlpipeline.Bids.adjust_fileprefix(fp, ...                
-                new_proc="MipIdif", new_mode="idif", remove_substring="_timeAppend-4");
+                new_proc="MipIdif"+opts.tags, new_mode="idif", remove_substring="_timeAppend-4");
 
             % adjust json_metadata from template
             j = opts.json_metadata_template;
@@ -865,6 +901,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.model_kind = ""
                 opts.reference_tracer {mustBeTextScalar} = "fdg" % consider "ho"
                 opts.minz_for_mip = 10 % used to remove scattering from inferior FOV
+                opts.dilate_m double = 0
             end
 
             this = mlaif.MipIdif();
@@ -904,6 +941,7 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
             this.reference_tracer = opts.reference_tracer;
             this.minz_for_mip = opts.minz_for_mip;
+            this.dilate_m_ = opts.dilate_m;
         end   
         function fn = json(obj)
             if isa(obj, 'mlfourd.ImagingContext2')
@@ -948,6 +986,7 @@ classdef MipIdif < handle & mlsystem.IHandle
     properties (Access = protected)
         centerline_on_reftrc_
         centerline_on_pet_
+        dilate_m_
         json_metadata_template_
         mediator_
         model_kind_

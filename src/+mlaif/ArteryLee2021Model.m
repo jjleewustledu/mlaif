@@ -249,21 +249,6 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             
             loss = mean(abs(1 - 0.5*eoverm - 0.5*eoverm_dc));
         end
-        function m = preferredMap()
-            m = containers.Map;
-            m('k1')  = struct('min',  0.5,   'max',   2,    'init',  0.5,  'sigma', 0.05); % alpha
-            m('k2')  = struct('min',  0.05,  'max',   0.15, 'init',  0.05, 'sigma', 0.05); % beta in 1/sec
-            m('k3')  = struct('min',  0.25,  'max',   3,    'init',  1,    'sigma', 0.05); % p
-            m('k4')  = struct('min', -1,     'max',   0,    'init', -0.5,  'sigma', 0.05); % dp2 for last bolus; p2 = p1 + dp2
-            m('k5')  = struct('min',  5,     'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec
-            m('k6')  = struct('min',  0,     'max',   0.2,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
-            m('k7')  = struct('min',  0.2,   'max',   0.8,  'init',  0.3,  'sigma', 0.05); % 2nd bolus fraction
-            m('k8')  = struct('min',  5,     'max',  20,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
-            m('k9')  = struct('min',  0.2,   'max',   0.4,  'init',  0.3,  'sigma', 0.05); % recirc fraction 
-            m('k10') = struct('min',  0,     'max',  20,    'init', 10,    'sigma', 0.05); % recirc delay 
-            m('k11') = struct('min',  1,     'max',   2,    'init',  1.3,  'sigma', 0.05); % amplitude 
-            m('k12') = struct('min',  0.01,  'max',   0.2,  'init',  0.1,  'sigma', 0.05); % g for steady-state accumulation 
-        end    
         function [qs,A_qs,qs_] = sampled(ks, Data, artery_interpolated, times_sampled)
             %% Returns:
             %      qs, the Bayesian estimate of the measured boxcar AIF, including baseline.
@@ -334,7 +319,7 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             qs = qs/max(qs); % \in [0 1] 
         end
         function qs = solution_2bolus(ks, N, tracer, p)
-            %% stretched gamma distribution + rising steadystate
+            %% stretched gamma distribution + steadystate
 
             import mlaif.ArteryLee2021Model.slide
             import mlaif.ArteryLee2021Model.halflife
@@ -344,18 +329,23 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             b = ks(2);
             g = ks(12);
             ss_frac = ks(6);
+            dp = ks(4);
+            p2 = max(p + dp, 0);
             
             if (t(1) >= t0) 
                 t_ = t - t0;
                 k_ = t_.^a .* exp(-(b*t_).^p);
                 k_ = k_/max(k_); % else overwhelmed by ss_
-                ss_ = 1 - exp(-g*t_);
+                [~,ttp_] = max(k_);
+                ss_ = (1 - exp(-t_/ttp_)).*exp(-(g*t_).^p2);
+                ss_ = ss_/max(ss_);
                 qs = (1 - ss_frac)*k_ + ss_frac*ss_;
             else % k is complex for t - t0 < 0
                 t_ = t - t(1);
                 k_ = t_.^a .* exp(-(b*t_).^p);
                 k_ = k_/max(k_); % else overwhelmed by ss_
-                ss_ = 1 - exp(-g*t_);
+                [~,ttp_] = max(k_);
+                ss_ = (1 - exp(-t_/ttp_)).*exp(-(g*t_).^p2);
                 qs = (1 - ss_frac)*k_ + ss_frac*ss_;
                 qs = slide(qs, t, t0 - t(1));
             end
@@ -425,6 +415,8 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
             switch convertStringsToChars(upper(tracer))
                 case {'FDG' '18F'}
                     tau = 1.82951 * 3600; % +/- 0.00034 h * sec/h
+                case {'RO948', 'MK6240', 'GTP1', 'ASEM', 'AZAN'}
+                    tau = 1.82951 * 3600; % +/- 0.00034 h * sec/h
                 case {'HO' 'CO' 'OC' 'OO' '15O' 'WATER' 'CARBONMONOXIDE' 'CARBON_MONOXIDE' 'OXYGEN'}
                     tau = 122.2416;
                 otherwise
@@ -454,10 +446,30 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                 conc = conc';
             end
         end
+
+        %% maps
+
+        function m = preferredMap()
+            T = 120;  % sec
+            m = containers.Map;
+            m('k1')  = struct('min',  0.5,   'max',   2,    'init',  0.5,  'sigma', 0.05); % alpha
+            m('k2')  = struct('min',  0.05,  'max',   0.15, 'init',  0.05, 'sigma', 0.05); % beta in 1/sec
+            m('k3')  = struct('min',  0.25,  'max',   3,    'init',  1,    'sigma', 0.05); % p
+            m('k4')  = struct('min', -1,     'max',   0,    'init', -0.5,  'sigma', 0.05); % dp steady-state; p_ss = max(p + dp, 0)
+            m('k5')  = struct('min',  5,     'max',  30,    'init',  0,    'sigma', 0.05); % t0 in sec
+            m('k6')  = struct('min',  0,     'max',   0.2,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
+            m('k7')  = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus fraction
+            m('k8')  = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
+            m('k9')  = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction 
+            m('k10') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay 
+            m('k11') = struct('min',  1,     'max',   2,    'init',  1.3,  'sigma', 0.05); % amplitude 
+            m('k12') = struct('min',  1/T,   'max',   T,    'init',  1/T,  'sigma', 0.05); % g for steady-state accumulation 
+        end    
+
         function map = static_adjustMapForModelKind(map, Data)
             switch convertStringsToChars(lower(Data.model_kind))
                 case '1bolus'        
-                    map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
+                    map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp steady-state; p_ss = max(p + dp, 0)
 
                     map('k6') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % steady-state fraction in (0, 1), for rising baseline
                     map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus fraction
@@ -466,7 +478,7 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                     map('k10') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay 
                     map('k12') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % g for steady-state accumulation 
                 case '2bolus'
-                    map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp2 for 2nd bolus
+                    map('k4') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % dp steady-state; p_ss = max(p + dp, 0)
 
                     map('k7') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus fraction
                     map('k8') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
@@ -484,20 +496,28 @@ classdef ArteryLee2021Model < handle & mlsystem.IHandle
                 map('k5') = struct('min', t0_forced-1, 'max', t0_forced+1, 'init', t0_forced, 'sigma', 0.05); % t0 in sec
             end
         end
+
         function map = static_adjustMapForTracer(map, Data)
             switch convertStringsToChars(upper(Data.tracer))
                 case {'RO948', 'MK6240', 'GTP1', 'ASEM', 'AZAN'}
-                    map('k1')  = struct('min',  0.5,   'max',  10,    'init',  5,    'sigma', 0.05); % alpha
-                    map('k2')  = struct('min',  0.01,  'max',   0.15, 'init',  0.05, 'sigma', 0.05); % beta
-                    map('k3')  = struct('min',  0.25,  'max',   4,    'init',  2,    'sigma', 0.05); % p
-
+                    T = 7200;  % sec
+                    map('k1')  = struct('min',  1,     'max',   8,    'init',  5,    'sigma', 0.05); % alpha
+                    map('k2')  = struct('min',  1e-2,  'max',   0.1,  'init',  0.1,  'sigma', 0.05); % beta
+                    map('k3')  = struct('min',  0.5,   'max',   1,    'init',  0.5,  'sigma', 0.05); % p
+                    map('k4')  = struct('min', -0.5,   'max',   0,    'init',  0,    'sigma', 0.05); % dp steady-state; p_ss = max(p + dp, 0)
+                    map('k5')  = struct('min',  5,     'max',  70,    'init',  0,    'sigma', 0.05); % t0 in sec
+                    map('k6')  = struct('min',  0,     'max',   0.5,  'init',  0,    'sigma', 0.05); % steady-state fraction in (0, 1)  
+                    map('k7')  = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus fraction
+                    map('k8')  = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % 2nd bolus delay
+                    map('k9')  = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
+                    map('k10') = struct('min',  0,     'max',   0,    'init',  0,    'sigma', 0.05); % recirc delay in sec
+                    map('k12') = struct('min',  0,     'max',   5e-3, 'init',  0,    'sigma', 0.05); % g for steady-state accumulation & 2nd bolus
+                case {'FDG' '18F'} 
+                    T = 3600;  % sec
                     map('k6')  = struct('min',  0.05,  'max',   0.5,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1)  
                     map('k9')  = struct('min',  0.05,  'max',   0.25, 'init',  0.05, 'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
                     map('k10') = struct('min',  5,     'max',  20,    'init', 10,    'sigma', 0.05); % recirc delay in sec
-                case {'FDG' '18F'}
-                    map('k6')  = struct('min',  0.05,  'max',   0.5,  'init',  0.05, 'sigma', 0.05); % steady-state fraction in (0, 1)  
-                    map('k9')  = struct('min',  0.05,  'max',   0.25, 'init',  0.05, 'sigma', 0.05); % recirc fraction < 0.5, for 2nd bolus
-                    map('k10') = struct('min',  5,     'max',  20,    'init', 10,    'sigma', 0.05); % recirc delay in sec
+                    map('k12') = struct('min',  1/T,   'max', 500/T,  'init',  1/T,  'sigma', 0.05); % g for steady-state accumulation
                 case {'HO' 'OH'}
                 case {'CO' 'OC' 'CARBONMONOXIDE' 'CARBON_MONOXIDE'}  
                     map('k1')  = struct('min',  0.1,  'max',  10,    'init',  0.25, 'sigma', 0.05); % alpha

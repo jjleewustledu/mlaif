@@ -28,7 +28,7 @@ classdef Test_MipIdif < matlab.unittest.TestCase
     methods (TestClassSetup)
         function setupMipIdif(this)
             import mlaif.*
-            this.testObj_ = MipIdif();
+            this.testObj_ = MipIdif.create();
         end
     end
     

@@ -1,5 +1,5 @@
 classdef ArteryLee2021Model < handle & mlsystem.IHandle
-	%% ArteryLee2021Model  
+	%% ArteryLee2021Model provide arterial bolus models for use with Matlab kinetics solvers, esp. simulated. annealing.
 
 	%  $Revision$
  	%  was created 14-Mar-2021 17:21:03 by jjlee,

@@ -6,8 +6,8 @@ classdef MipIdif < handle & mlsystem.IHandle
     %  Developed on Matlab 9.14.0.2254940 (R2023a) Update 2 for MACI64.  Copyright 2023 John J. Lee.
     
     properties (Constant)
-        ALPHA = 0.25
-        FLIRT_COST = 'normmi'
+        ALPHA = 0.35
+        FLIRT_COST = 'mutualinfo'
         max_len_mipt = 30
     end
 
@@ -69,9 +69,9 @@ classdef MipIdif < handle & mlsystem.IHandle
                             sprintf("centerline_on_pet_dilate-m%i.nii.gz", this.dilate_m_)));
                     else
                         this.centerline_on_pet_ = mlfourd.ImagingContext2( ...
-                            fullfile(this.pet_mipt.filepath, "centerline_on_pet_MipIdif.nii.gz"));
+                            fullfile(this.pet_mipt.filepath, "centerline_on_pet.nii.gz"));
                     end
-                    % assert(isfile(this.centerline_on_pet_))
+                    assert(isfile(this.centerline_on_pet_))
                 catch ME
                     handexcept(ME)
                 end
@@ -145,16 +145,6 @@ classdef MipIdif < handle & mlsystem.IHandle
             if ~isempty(this.pet_avgt_)
                 g = this.pet_avgt_;
                 return
-            end
-
-            if contains(this.tracer, "oo", IgnoreCase=true)
-                % OO static is often corrupted by motion
-                this.pet_avgt_ = this.pet_dyn.timeAveraged(weights=asrow(this.pet_dyn.json_metadata.taus));
-                this.pet_avgt_.relocateToDerivativesFolder();
-                if ~isfile(this.pet_avgt_)
-                    save(this.pet_avgt_);
-                end
-                g = this.pet_avgt_;
             end
 
             % prefer static
@@ -604,7 +594,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                 'out', this.t1w_on_pet, ...
                 'omat', this.mat(this.t1w_on_pet), ...
                 'bins', 256, ...
-                'cost', 'mutualinfo', ...
+                'cost', this.FLIRT_COST, ...
                 'dof', 6, ...
                 'interp', 'spline', ...
                 'noclobber', false);
@@ -694,13 +684,13 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.mipt_thr double = 180000
                 opts.frac_select double = this.ALPHA
                 opts.do_view logical = false
-            end
+            end            
 
             cl_tags = split(opts.cl.fileprefix, "centerline_on_pet");
             cl_tags = strrep(cl_tags(2), "_", "-");
             sel_tags = sprintf("-select%g", opts.frac_select);
             sel_tags = strrep(sel_tags, ".", "p");
-            tags = cl_tags + sel_tags;
+            tags = cl_tags; % + sel_tags;
             
             % adjust opts.mipt_thr for CO
             tr = mlfourd.ImagingContext2(petobj);
@@ -708,6 +698,13 @@ classdef MipIdif < handle & mlsystem.IHandle
             assert(~isempty(re))
             if strcmp(re.trc, "co") || strcmp(re.trc, "oc")
                 opts.mipt_thr = min(50000, opts.mipt_thr);
+            end
+
+            % adjust frac_select for size of petobj
+            sz = size(tr);
+            if sz(1) < 440
+                voxel_volume_factor = 440/sz(1);
+                opts.frac_select = min([1, voxel_volume_factor^2 * opts.frac_select]);
             end
 
             %% select this.ALPHA*numel of brightest and earliest-arriving voxels from centerline        
@@ -719,12 +716,6 @@ classdef MipIdif < handle & mlsystem.IHandle
             tr_single = single(tr);
             sz = size(tr_single);
             [tr_mipt,tr_indices] = max(tr, [], 4); % ~ 45 sec for dyn CO with 200 frames
-            if ~isfile(tr_mipt)                    
-                tr_mipt.save();
-            end
-            if ~isfile(tr_indices)
-                tr_indices.save();
-            end
             cache.tr_mipt = tr_mipt;
             cache.tr_indices = tr_indices;
             if opts.do_view
@@ -827,14 +818,17 @@ classdef MipIdif < handle & mlsystem.IHandle
             end
 
             % cached on filesystem
-            if isfile(this.new_fqfp + ".nii.gz")
-                idif_ic = mlfourd.ImagingContext2(this.new_fqfp + ".nii.gz");
-                return
-            end
+            % if isfile(this.new_fqfp + ".nii.gz")
+            %     idif_ic = mlfourd.ImagingContext2(this.new_fqfp + ".nii.gz");
+            %     return
+            % end
 
             idif_ic = [];
             if opts.steps(1)
+                tic
                 this.build_pet_objects(); % lots of fsl ops
+                fprintf("%s: step 1: ", stackstr())
+                toc
             end
             if opts.steps(2)
                 % try
@@ -863,7 +857,10 @@ classdef MipIdif < handle & mlsystem.IHandle
                 end
             end
             if opts.steps(5)
+                tic
                 idif_ic = this.build_aif(this.pet_dyn, frac_select=opts.frac_select); % by statistical sampling
+                fprintf("%s: step 5:", stackstr())
+                toc
             end
             if opts.steps(6) % && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
                 % idif_ic = this.build_deconv(idif_ic);
@@ -948,7 +945,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                     'out', this.t1w_on_pet_fqfn, ...
                     'omat', this.mat(this.t1w_on_pet_fqfn), ...
                     'bins', 256, ...
-                    'cost', 'mutualinfo', ...
+                    'cost', this.FLIRT_COST, ...
                     'dof', 6, ...
                     'searchrx', [-180,180], ...
                     'searchry', [-180,180], ...
@@ -962,7 +959,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                     'out', this.t1w_on_pet_fqfn, ...
                     'omat', this.mat(this.t1w_on_pet_fqfn), ...
                     'bins', 256, ...
-                    'cost', 'mutualinfo', ...
+                    'cost', this.FLIRT_COST, ...
                     'dof', 6, ...
                     'interp', 'spline', ...
                     'noclobber', false);
@@ -1033,11 +1030,11 @@ classdef MipIdif < handle & mlsystem.IHandle
                 idif_ic = this.build_aif(this.pet_dyn, frac_select=opts.frac_select); % by statistical sampling
             end
             if opts.steps(4) % && ~strcmpi(this.tracer, "co") && ~strcmpi(this.tracer, "oc")
-                idif_ic = this.build_deconv(idif_ic);
+                %idif_ic = this.build_deconv(idif_ic);
             end
 
             if opts.delete_large_files && ~contains(this.pet_dyn.filepath, "sourcedata")
-                deleteExisting(this.pet_dyn.fqfp+".*")
+                %deleteExisting(this.pet_dyn.fqfp+".*")
             end
         end
 
@@ -1234,9 +1231,14 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.remove_substring {mustBeTextScalar} = "_timeAppend-4"
                 opts.tags {mustBeTextScalar} = ""
             end
+            
+            if ~isempty(this.new_fqfp_)
+                fqfp = this.new_fqfp_;
+                return
+            end
 
             pth = fullfile(this.mediator_.derivSesPath, "pet");
-            fp = mlpipeline.Bids.adjust_fileprefix(this.pet_avgt.fileprefix, ...                
+            fp = mlpipeline.Bids.adjust_fileprefix(this.pet_dyn.fileprefix, ...                
                 new_proc="MipIdif"+opts.tags, new_mode="idif", remove_substring=opts.remove_substring);
             fqfp = fullfile(pth, fp);
             if contains(fqfp, "*")
@@ -1246,6 +1248,7 @@ classdef MipIdif < handle & mlsystem.IHandle
                     warning("mlaif:RuntimeWarning", stackstr()+" returned string array of length "+numel(fqfp))
                 end
             end
+            this.new_fqfp_ = fqfp;
         end
         
         function g = new_fqfileprefix(this, varargin)
@@ -1415,6 +1418,8 @@ classdef MipIdif < handle & mlsystem.IHandle
                 opts.filename_pattern_static_fdg {mustBeTextScalar} = "sub-*_ses-*_trc-fdg_proc-consoleStatic.nii.gz"
             end
 
+            tic
+
             this = mlaif.MipIdif();
             this.bids_kit_ = opts.bids_kit;
             this.tracer_kit_ = opts.tracer_kit;
@@ -1456,6 +1461,9 @@ classdef MipIdif < handle & mlsystem.IHandle
             this.filename_pattern_static = opts.filename_pattern_static;
             this.filename_pattern_dynamic_fdg = opts.filename_pattern_dynamic_fdg;
             this.filename_pattern_static_fdg = opts.filename_pattern_static_fdg;
+
+            fprintf("%s: ", stackstr())
+            toc
         end   
         
         function fn = json(obj)
@@ -1485,16 +1493,16 @@ classdef MipIdif < handle & mlsystem.IHandle
             fn = strcat(ic.fqfp, '.nii.gz');
         end
         
-        function ic = timeAppend(ic)
-            toglob = strrep(ic, "-delay0-", "-delay*-");
-            mg = mglob(toglob);
-            if 1 == length(mg)
-                return
-            else
-                fprintf("%s: (%s).timeAppend(%s)\n", stackstr(3), ic.fileprefix, mg(2))
-                ic = ic.timeAppend(mg(2));
-            end
-        end
+        % function ic = timeAppend(ic)
+        %     toglob = strrep(ic, "-delay0-", "-delay*-");
+        %     mg = mglob(toglob);
+        %     if 1 == length(mg)
+        %         return
+        %     else
+        %         fprintf("%s: (%s).timeAppend(%s)\n", stackstr(3), ic.fileprefix, mg(2))
+        %         ic = ic.timeAppend(mg(2));
+        %     end
+        % end
         
         function viewAnat()
         end
@@ -1511,6 +1519,7 @@ classdef MipIdif < handle & mlsystem.IHandle
         json_metadata_template_
         mediator_
         model_kind_
+        new_fqfp_
         pet_avgt_
         pet_dyn_
         pet_mipt_
